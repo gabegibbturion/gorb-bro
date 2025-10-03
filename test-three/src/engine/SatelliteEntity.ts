@@ -248,6 +248,20 @@ export class SatelliteEntity {
         return this.mesh.visible;
     }
 
+    public setSelected(selected: boolean): void {
+        if (this.mesh && this.mesh.material instanceof THREE.MeshBasicMaterial) {
+            if (selected) {
+                // Highlight selected satellite with a brighter color and larger size
+                this.mesh.material.color.setHex(0xffffff);
+                this.mesh.scale.setScalar(1.5);
+            } else {
+                // Reset to original color and size
+                this.mesh.material.color.setHex(this.options.color);
+                this.mesh.scale.setScalar(1.0);
+            }
+        }
+    }
+
     public dispose(): void {
         if (this.mesh) {
             this.mesh.geometry.dispose();

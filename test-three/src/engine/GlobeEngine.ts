@@ -29,6 +29,9 @@ export class GlobeEngine {
     private stats!: Stats;
     private animationId: number | null = null;
     private isRunning: boolean = false;
+    private raycaster: THREE.Raycaster;
+    private mouse: THREE.Vector2;
+    private selectedEntity: SatelliteEntity | null = null;
 
     private options: Required<GlobeEngineOptions>;
     private clock: THREE.Clock;
@@ -41,6 +44,7 @@ export class GlobeEngine {
     private onEngineReady?: () => void;
     private onTimeUpdate?: (time: Date) => void;
     private onSatelliteUpdate?: (satellites: SatelliteEntity[]) => void;
+    private onEntitySelected?: (entity: SatelliteEntity | null) => void;
 
     constructor(options: GlobeEngineOptions) {
         this.container = options.container;
@@ -56,10 +60,18 @@ export class GlobeEngine {
         };
 
         this.clock = new THREE.Clock();
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
         this.init();
     }
 
     private init(): void {
+        // Disable Three.js shader errors globally for better performance
+        THREE.WebGLRenderer.prototype.debug = {
+            checkShaderErrors: false,
+            onShaderError: () => { }
+        };
+
         this.createScene();
         this.createCamera();
         this.createRenderer();
@@ -77,7 +89,7 @@ export class GlobeEngine {
 
     private createScene(): void {
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x000011);
+        // this.createSkybox();
     }
 
     private createCamera(): void {
@@ -89,12 +101,19 @@ export class GlobeEngine {
     private createRenderer(): void {
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
-            alpha: true
+            alpha: true,
+            powerPreference: "high-performance"
         });
         this.renderer.setSize(this.options.width, this.options.height);
         this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        // this.renderer.shadowMap.enabled = true;
+        // this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        // Disable shader errors and warnings for better performance
+        this.renderer.debug = {
+            checkShaderErrors: false,
+            onShaderError: () => { }
+        };
 
         this.container.appendChild(this.renderer.domElement);
     }
@@ -131,9 +150,28 @@ export class GlobeEngine {
         return texture;
     }
 
+    private createSkybox(): void {
+        // Create a large sphere for the skybox
+        const skyboxGeometry = new THREE.SphereGeometry(500, 32, 32);
+
+        // Load the skybox texture
+        const loader = new THREE.TextureLoader();
+        const skyboxTexture = loader.load('/src/assets/skybox.jpeg');
+
+        // Create material for the skybox
+        const skyboxMaterial = new THREE.MeshBasicMaterial({
+            map: skyboxTexture,
+            side: THREE.BackSide // Render the inside of the sphere
+        });
+
+        // Create the skybox mesh
+        const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+        this.scene.add(skybox);
+    }
+
     private createLights(): void {
         // Ambient light
-        const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+        const ambientLight = new THREE.AmbientLight(0x404040, 5);
         this.scene.add(ambientLight);
 
         // Directional light (sun) - position will be calculated based on current time
@@ -156,9 +194,9 @@ export class GlobeEngine {
 
         // Initialize LOD system with camera
         this.entityManager.initializeLOD(this.camera, {
-            lodDistances: [0.1, 0.3, 0.8, 2.0], // Much closer LOD distances for better performance
-            clusterDistance: 5.0, // Increased cluster distance to group more satellites
-            maxVisibleSatellites: 10000, // Maximum visible satellites
+            lodDistances: [0.0005, 0.002, 0.005, .01], // Very aggressive LOD for maximum performance
+            clusterDistance: 1500.0, // Large cluster distance to group more satellites
+            maxVisibleSatellites: 50000, // Much higher limit for instanced rendering
             useInstancing: true
         });
 
@@ -176,12 +214,12 @@ export class GlobeEngine {
         // Create OrbitControls for camera rotation around the globe
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.target.set(0, 0, 0); // Target the center of the globe
-        this.controls.enableDamping = true;
-        this.controls.dampingFactor = 0.05;
+        this.controls.enableDamping = false;
+        // this.controls.dampingFactor = 0.05;
         this.controls.enableZoom = true;
         this.controls.enablePan = false; // Disable panning to keep camera orbiting around globe
-        this.controls.minDistance = 2;
-        this.controls.maxDistance = 20;
+        this.controls.minDistance = 1;
+        this.controls.maxDistance = 30;
     }
 
     private createStats(): void {
@@ -200,6 +238,7 @@ export class GlobeEngine {
 
     private setupEventListeners(): void {
         window.addEventListener('resize', () => this.onWindowResize());
+        this.renderer.domElement.addEventListener('click', (event) => this.onMouseClick(event));
     }
 
     private onWindowResize(): void {
@@ -210,6 +249,55 @@ export class GlobeEngine {
         this.camera.updateProjectionMatrix();
 
         this.renderer.setSize(width, height);
+    }
+
+    private onMouseClick(event: MouseEvent): void {
+        // Calculate mouse position in normalized device coordinates (-1 to +1)
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        // Update the picking ray with the camera and mouse position
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+
+        // Get all satellite meshes for intersection testing
+        const satellites = this.entityManager.getAllSatellites();
+        const satelliteMeshes = satellites.map(sat => sat.getMesh());
+
+        // Calculate objects intersecting the picking ray
+        const intersects = this.raycaster.intersectObjects(satelliteMeshes);
+
+        if (intersects.length > 0) {
+            // Find the satellite entity that was clicked
+            const clickedMesh = intersects[0].object;
+            const selectedSatellite = satellites.find(sat => sat.getMesh() === clickedMesh);
+
+            if (selectedSatellite) {
+                this.selectEntity(selectedSatellite);
+            }
+        } else {
+            // Clicked on empty space, deselect
+            // this.selectEntity(null);
+        }
+    }
+
+    private selectEntity(entity: SatelliteEntity | null): void {
+        // Clear previous selection visual feedback
+        if (this.selectedEntity) {
+            this.selectedEntity.setSelected(false);
+        }
+
+        this.selectedEntity = entity;
+
+        // Add visual feedback for new selection
+        if (this.selectedEntity) {
+            this.selectedEntity.setSelected(true);
+        }
+
+        // Notify callback
+        if (this.onEntitySelected) {
+            this.onEntitySelected(this.selectedEntity);
+        }
     }
 
     public start(): void {
@@ -385,6 +473,18 @@ export class GlobeEngine {
 
     public onSatelliteUpdateCallback(callback: (satellites: SatelliteEntity[]) => void): void {
         this.onSatelliteUpdate = callback;
+    }
+
+    public onEntitySelectedCallback(callback: (entity: SatelliteEntity | null) => void): void {
+        this.onEntitySelected = callback;
+    }
+
+    public getSelectedEntity(): SatelliteEntity | null {
+        return this.selectedEntity;
+    }
+
+    public deselectEntity(): void {
+        this.selectEntity(null);
     }
 
     public dispose(): void {

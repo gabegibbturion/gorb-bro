@@ -158,10 +158,24 @@ export class EntityManager {
         if (!this.lodSystem) return;
 
         const visibleSatellites = this.lodSystem.getVisibleSatellites();
+        const lodGroups = this.lodSystem.getLODGroups();
 
         // Hide all satellites first
         this.satellites.forEach(satellite => {
             satellite.setVisible(false);
+        });
+
+        // Process each LOD group for efficient rendering
+        lodGroups.forEach((satellites, lodLevel) => {
+            if (satellites.length === 0) return;
+
+            // Use instanced rendering for better performance
+            if (this.lodSystem!.getRenderingMethod(lodLevel) === 'instanced') {
+                this.renderInstancedGroup(satellites, lodLevel);
+            } else {
+                // Use point cloud for distant satellites
+                this.renderPointCloudGroup(satellites, lodLevel);
+            }
         });
 
         // Show only visible satellites
@@ -172,6 +186,22 @@ export class EntityManager {
                 satellite.setLODData(lodData);
             }
         });
+    }
+
+    private renderInstancedGroup(satellites: any[], lodLevel: number): void {
+        // Create or update instanced mesh for this LOD level
+        const instancedMesh = this.lodSystem!.createInstancedMesh(lodLevel, satellites.length);
+        if (instancedMesh) {
+            this.lodSystem!.updateInstancedMesh(instancedMesh, satellites);
+        }
+    }
+
+    private renderPointCloudGroup(satellites: any[], lodLevel: number): void {
+        // Create or update point cloud for this LOD level
+        const pointCloud = this.lodSystem!.createPointCloud(lodLevel, satellites.length);
+        if (pointCloud) {
+            this.lodSystem!.updatePointCloud(pointCloud, satellites);
+        }
     }
 
     public startAutoUpdate(): void {

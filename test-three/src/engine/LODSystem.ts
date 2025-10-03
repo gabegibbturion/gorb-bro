@@ -27,7 +27,7 @@ export class LODSystem {
     private matrix: THREE.Matrix4;
     private satellites: Map<string, SatelliteLOD> = new Map();
     private clusters: Map<string, string[]> = new Map();
-    private lastUpdateTime: number = 0;
+    // private lastUpdateTime: number = 0; // Removed unused variable
     private instancedMeshes: Map<number, THREE.InstancedMesh> = new Map();
     private pointClouds: Map<number, THREE.Points> = new Map();
     private lodGeometries: Map<number, THREE.SphereGeometry> = new Map();
@@ -67,37 +67,88 @@ export class LODSystem {
     }
 
     private createMaterials(): void {
-        // Simple materials for different LOD levels
-        this.materials.set(0, new THREE.MeshBasicMaterial({ color: 0xffff00 }));
-        this.materials.set(1, new THREE.MeshBasicMaterial({ color: 0xffff00 }));
-        this.materials.set(2, new THREE.MeshBasicMaterial({ color: 0xffff00 }));
-        this.materials.set(3, new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+        // Create palette texture for satellite colors
+        const paletteTexture = this.createPaletteTexture();
+
+        // Materials with palette texture for different LOD levels
+        this.materials.set(0, new THREE.MeshBasicMaterial({
+            map: paletteTexture,
+            transparent: true,
+            opacity: 0.9
+        }));
+        this.materials.set(1, new THREE.MeshBasicMaterial({
+            map: paletteTexture,
+            transparent: true,
+            opacity: 0.8
+        }));
+        this.materials.set(2, new THREE.MeshBasicMaterial({
+            map: paletteTexture,
+            transparent: true,
+            opacity: 0.6
+        }));
+        this.materials.set(3, new THREE.MeshBasicMaterial({
+            map: paletteTexture,
+            transparent: true,
+            opacity: 0.4
+        }));
 
         // Point materials for distant satellites with smaller sizes
         this.pointMaterials.set(0, new THREE.PointsMaterial({
             size: 0.05,
             vertexColors: true,
             transparent: true,
-            opacity: 0.9
+            opacity: 0.9,
+            map: paletteTexture
         }));
         this.pointMaterials.set(1, new THREE.PointsMaterial({
             size: 0.04,
             vertexColors: true,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.8,
+            map: paletteTexture
         }));
         this.pointMaterials.set(2, new THREE.PointsMaterial({
             size: 0.03,
             vertexColors: true,
             transparent: true,
-            opacity: 0.6
+            opacity: 0.6,
+            map: paletteTexture
         }));
         this.pointMaterials.set(3, new THREE.PointsMaterial({
             size: 0.02,
             vertexColors: true,
             transparent: true,
-            opacity: 0.4
+            opacity: 0.4,
+            map: paletteTexture
         }));
+    }
+
+    private createPaletteTexture(): THREE.Texture {
+        // Create a 256x1 texture with a color palette
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 1;
+        const ctx = canvas.getContext('2d')!;
+
+        // Create a gradient with satellite-like colors
+        const gradient = ctx.createLinearGradient(0, 0, 255, 0);
+        gradient.addColorStop(0, '#ffff00'); // Yellow
+        gradient.addColorStop(0.2, '#ff0000'); // Red
+        gradient.addColorStop(0.4, '#00ff00'); // Green
+        gradient.addColorStop(0.6, '#0000ff'); // Blue
+        gradient.addColorStop(0.8, '#ff00ff'); // Magenta
+        gradient.addColorStop(1, '#00ffff'); // Cyan
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 256, 1);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+
+        return texture;
     }
 
     public updateSatellite(id: string, position: THREE.Vector3): void {
@@ -135,15 +186,35 @@ export class LODSystem {
     }
 
     private isOccluded(position: THREE.Vector3): boolean {
-        // Simple occlusion test - check if satellite is behind Earth
+        // Enhanced occlusion test - check if satellite is behind Earth
         const earthCenter = new THREE.Vector3(0, 0, 0);
         const earthRadius = 1.0;
 
-        const direction = position.clone().sub(earthCenter).normalize();
-        const cameraDirection = this.camera.position.clone().sub(earthCenter).normalize();
+        // Calculate vector from camera to satellite
+        const cameraToSatellite = position.clone().sub(this.camera.position);
+        const cameraToEarth = earthCenter.clone().sub(this.camera.position);
 
-        // If satellite is on the opposite side of Earth from camera
-        return direction.dot(cameraDirection) < 0 && position.length() > earthRadius;
+        // Check if satellite is behind Earth from camera's perspective
+        const dotProduct = cameraToSatellite.dot(cameraToEarth);
+
+        // If dot product is positive, satellite is in the same direction as Earth
+        if (dotProduct > 0) {
+            // Check if satellite is actually behind Earth
+            const distanceToEarth = cameraToEarth.length();
+            const distanceToSatellite = cameraToSatellite.length();
+
+            // If satellite is further than Earth, it might be occluded
+            if (distanceToSatellite > distanceToEarth) {
+                // More precise test: check if the line from camera to satellite intersects Earth
+                const t = cameraToEarth.dot(cameraToSatellite) / cameraToSatellite.lengthSq();
+                if (t > 0 && t < 1) {
+                    const closestPoint = this.camera.position.clone().add(cameraToSatellite.multiplyScalar(t));
+                    return closestPoint.length() < earthRadius;
+                }
+            }
+        }
+
+        return false;
     }
 
     public getVisibleSatellites(): SatelliteLOD[] {
@@ -183,7 +254,7 @@ export class LODSystem {
         return instancedMesh;
     }
 
-    public createInstancedBufferGeometry(lodLevel: number, count: number): THREE.InstancedBufferGeometry | null {
+    public createInstancedBufferGeometry(_lodLevel: number, count: number): THREE.InstancedBufferGeometry | null {
         if (!this.config.useInstancing) return null;
 
         // Create a simple quad geometry for instanced rendering
@@ -212,20 +283,42 @@ export class LODSystem {
         const material = this.pointMaterials.get(lodLevel);
         if (!material) return null;
 
-        // Create buffer geometry for points with positions and colors
+        // Create efficient point cloud geometry similar to the provided example
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(count * 3); // x, y, z for each point
         const colors = new Float32Array(count * 3); // r, g, b for each point
 
-        // Initialize with random colors
+        // Initialize with optimized color distribution
+        const color = new THREE.Color();
+        const n = 1000; // Spread factor
+        const n2 = n / 2;
+
         for (let i = 0; i < count; i++) {
-            colors[i * 3] = Math.random();     // r
-            colors[i * 3 + 1] = Math.random(); // g
-            colors[i * 3 + 2] = Math.random(); // b
+            const i3 = i * 3;
+
+            // Generate positions in a more controlled manner
+            const x = (Math.random() * n - n2) * 0.1; // Scale down for satellite positions
+            const y = (Math.random() * n - n2) * 0.1;
+            const z = (Math.random() * n - n2) * 0.1;
+
+            positions[i3] = x;
+            positions[i3 + 1] = y;
+            positions[i3 + 2] = z;
+
+            // Generate colors based on position (similar to the example)
+            const vx = x / n + 0.5;
+            const vy = y / n + 0.5;
+            const vz = z / n + 0.5;
+
+            color.setRGB(vx, vy, vz);
+            colors[i3] = color.r;
+            colors[i3 + 1] = color.g;
+            colors[i3 + 2] = color.b;
         }
 
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geometry.computeBoundingSphere();
 
         const points = new THREE.Points(geometry, material);
         return points;

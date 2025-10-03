@@ -37,7 +37,9 @@ export default function Globe({
     const [isPaused, setIsPaused] = useState(false);
     const [timeMultiplier, setTimeMultiplier] = useState(1);
     const [showOrbits, setShowOrbits] = useState(false);
-    const [satelliteCountInput, setSatelliteCountInput] = useState(10);
+    const [satelliteCountInput, setSatelliteCountInput] = useState(1000);
+    const [selectedEntity, setSelectedEntity] = useState<any>(null);
+    const [showSidePanel, setShowSidePanel] = useState(false);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -87,6 +89,11 @@ export default function Globe({
             if (onTimeUpdate) {
                 onTimeUpdate(time);
             }
+        });
+
+        engine.onEntitySelectedCallback((entity) => {
+            setSelectedEntity(entity);
+            setShowSidePanel(entity !== null);
         });
 
 
@@ -450,6 +457,122 @@ export default function Globe({
                 </div>
             )} */}
 
+            {/* Side Panel for Selected Entity */}
+            {showSidePanel && selectedEntity && (
+                <div style={{
+                    position: 'absolute',
+                    top: '10px',
+                    right: '10px',
+                    background: 'rgba(0, 0, 0, 0.9)',
+                    color: 'white',
+                    padding: '15px',
+                    borderRadius: '8px',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    minWidth: '300px',
+                    maxWidth: '400px',
+                    maxHeight: '80vh',
+                    overflow: 'auto',
+                    border: '2px solid #4CAF50',
+                    zIndex: 1000
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <h3 style={{ margin: 0, color: '#4CAF50' }}>Satellite Details</h3>
+                        <button
+                            onClick={() => {
+                                if (engineRef.current) {
+                                    engineRef.current.deselectEntity();
+                                }
+                            }}
+                            style={{
+                                background: '#f44336',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '3px',
+                                padding: '5px 10px',
+                                cursor: 'pointer',
+                                fontSize: '10px'
+                            }}
+                        >
+                            ✕ Close
+                        </button>
+                    </div>
+
+                    <div style={{ marginBottom: '10px' }}>
+                        <strong>Name:</strong> {selectedEntity.name}
+                    </div>
+
+                    <div style={{ marginBottom: '10px' }}>
+                        <strong>ID:</strong> {selectedEntity.id}
+                    </div>
+
+                    {selectedEntity.getCurrentLocation && (
+                        <div style={{ marginBottom: '10px' }}>
+                            <strong>Current Position:</strong>
+                            {(() => {
+                                try {
+                                    const location = selectedEntity.getCurrentLocation();
+                                    return location && typeof location.latitude === 'number' && typeof location.longitude === 'number' && typeof location.altitude === 'number' ? (
+                                        <div style={{ marginLeft: '10px', fontSize: '11px' }}>
+                                            <div>Lat: {location.latitude.toFixed(4)}°</div>
+                                            <div>Lon: {location.longitude.toFixed(4)}°</div>
+                                            <div>Alt: {location.altitude.toFixed(2)} km</div>
+                                        </div>
+                                    ) : (
+                                        <div style={{ marginLeft: '10px', fontSize: '11px', color: '#ff9800' }}>
+                                            Position not available
+                                        </div>
+                                    );
+                                } catch (error) {
+                                    return (
+                                        <div style={{ marginLeft: '10px', fontSize: '11px', color: '#ff9800' }}>
+                                            Error getting position
+                                        </div>
+                                    );
+                                }
+                            })()}
+                        </div>
+                    )}
+
+                    {selectedEntity.getOrbitalElements && (
+                        <div style={{ marginBottom: '10px' }}>
+                            <strong>Orbital Elements:</strong>
+                            {(() => {
+                                try {
+                                    const coe = selectedEntity.getOrbitalElements();
+                                    return coe ? (
+                                        <div style={{ marginLeft: '10px', fontSize: '11px' }}>
+                                            <div>Inclination: {coe.inclination ? (coe.inclination * 180 / Math.PI).toFixed(2) : 'N/A'}°</div>
+                                            <div>RAAN: {coe.rightAscension ? (coe.rightAscension * 180 / Math.PI).toFixed(2) : 'N/A'}°</div>
+                                            <div>Eccentricity: {coe.eccentricity ? coe.eccentricity.toFixed(6) : 'N/A'}</div>
+                                            <div>Argument of perigee: {coe.argumentOfPerigee ? (coe.argumentOfPerigee * 180 / Math.PI).toFixed(2) : 'N/A'}°</div>
+                                            <div>Mean anomaly: {coe.meanAnomaly ? (coe.meanAnomaly * 180 / Math.PI).toFixed(2) : 'N/A'}°</div>
+                                            <div>Mean motion: {coe.meanMotion ? coe.meanMotion.toFixed(8) : 'N/A'} rev/day</div>
+                                        </div>
+                                    ) : (
+                                        <div style={{ marginLeft: '10px', fontSize: '11px', color: '#ff9800' }}>
+                                            Orbital elements not available
+                                        </div>
+                                    );
+                                } catch (error) {
+                                    return (
+                                        <div style={{ marginLeft: '10px', fontSize: '11px', color: '#ff9800' }}>
+                                            Error getting orbital elements
+                                        </div>
+                                    );
+                                }
+                            })()}
+                        </div>
+                    )}
+
+                    <div style={{ marginTop: '15px', padding: '10px', background: 'rgba(76, 175, 80, 0.1)', borderRadius: '5px' }}>
+                        <div style={{ fontSize: '11px', color: '#4CAF50' }}>
+                            💡 Click anywhere on the screen to deselect
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Instructions */}
             <div style={{
                 position: 'absolute',
@@ -466,7 +589,8 @@ export default function Globe({
                 <div><strong>Controls:</strong></div>
                 <div>• Mouse: Rotate camera around globe</div>
                 <div>• Wheel: Zoom in/out</div>
-                <div>• Buttons: Manage satellites</div>
+                <div>• Click satellites to view details</div>
+                <div>• Click empty space to deselect</div>
                 <div>• Sun position updates with time</div>
             </div>
         </div>
