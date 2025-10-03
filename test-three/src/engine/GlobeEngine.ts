@@ -151,7 +151,15 @@ export class GlobeEngine {
         this.entityManager = new EntityManager(this.scene, {
             maxSatellites: this.options.maxSatellites,
             autoCleanup: true,
-            updateInterval: 100 // Update every 100ms for smoother trails
+            updateInterval: 16 // Update every frame (60fps)
+        });
+
+        // Initialize LOD system with camera
+        this.entityManager.initializeLOD(this.camera, {
+            lodDistances: [0.1, 0.3, 0.8, 2.0], // Much closer LOD distances for better performance
+            clusterDistance: 5.0, // Increased cluster distance to group more satellites
+            maxVisibleSatellites: 10000, // Maximum visible satellites
+            useInstancing: true
         });
 
         // Set up entity manager callbacks

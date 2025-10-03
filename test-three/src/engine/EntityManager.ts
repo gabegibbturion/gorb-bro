@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LODSystem } from './LODSystem';
 import type { OrbitalElements } from './OrbitalElements';
 import { OrbitalElementsGenerator } from './OrbitalElements';
 import type { SatelliteEntityOptions } from './SatelliteEntity';
@@ -17,6 +18,7 @@ export class EntityManager {
     private updateTimer: number | null = null;
     private currentTime: Date = new Date();
     private isUpdating: boolean = false;
+    private lodSystem: LODSystem | null = null;
 
     // Event callbacks
     private onSatelliteAdded?: (satellite: SatelliteEntity) => void;
@@ -31,6 +33,10 @@ export class EntityManager {
             updateInterval: 1000, // 1 second
             ...options
         };
+    }
+
+    public initializeLOD(camera: THREE.Camera, config?: Partial<import('./LODSystem').LODConfig>): void {
+        this.lodSystem = new LODSystem(camera, config);
     }
 
     public addSatellite(orbitalElements: OrbitalElements, options?: Partial<SatelliteEntityOptions>): SatelliteEntity | null {
@@ -128,7 +134,17 @@ export class EntityManager {
         // Update all satellites
         this.satellites.forEach(satellite => {
             satellite.update(time);
+
+            // Update LOD system if available
+            if (this.lodSystem) {
+                this.lodSystem.updateSatellite(satellite.id, satellite.getPosition());
+            }
         });
+
+        // Apply LOD visibility if system is available
+        if (this.lodSystem) {
+            this.applyLODVisibility();
+        }
 
         // Trigger update callback
         if (this.onUpdate) {
@@ -136,6 +152,26 @@ export class EntityManager {
         }
 
         this.isUpdating = false;
+    }
+
+    private applyLODVisibility(): void {
+        if (!this.lodSystem) return;
+
+        const visibleSatellites = this.lodSystem.getVisibleSatellites();
+
+        // Hide all satellites first
+        this.satellites.forEach(satellite => {
+            satellite.setVisible(false);
+        });
+
+        // Show only visible satellites
+        visibleSatellites.forEach(lodData => {
+            const satellite = this.satellites.get(lodData.id);
+            if (satellite) {
+                satellite.setVisible(true);
+                satellite.setLODData(lodData);
+            }
+        });
     }
 
     public startAutoUpdate(): void {
@@ -278,5 +314,10 @@ export class EntityManager {
         this.stopAutoUpdate();
         this.clearAll();
         this.satellites.clear();
+
+        if (this.lodSystem) {
+            this.lodSystem.dispose();
+            this.lodSystem = null;
+        }
     }
 }

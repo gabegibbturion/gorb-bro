@@ -1,5 +1,6 @@
 import * as satellite from 'satellite.js';
 import * as THREE from 'three';
+import type { SatelliteLOD } from './LODSystem';
 import { OrbitVisualization } from './OrbitVisualization';
 import type { ClassicalOrbitalElements } from './OrbitalElements';
 
@@ -37,6 +38,7 @@ export class SatelliteEntity {
     private options: Required<SatelliteEntityOptions>;
     private currentPosition: THREE.Vector3 = new THREE.Vector3();
     private currentVelocity: THREE.Vector3 = new THREE.Vector3();
+    private lodData: SatelliteLOD | null = null;
 
     constructor(options: SatelliteEntityOptions) {
         this.id = Math.random().toString(36).substr(2, 9);
@@ -151,14 +153,12 @@ export class SatelliteEntity {
                     vel.z * scaleFactor
                 );
 
-
                 // Calculate geodetic coordinates for location display
                 const gmst = satellite.gstime(time);
                 satellite.eciToGeodetic(pos, gmst);
 
                 // Update mesh position
                 this.mesh.position.copy(this.currentPosition);
-
             }
         } catch (error) {
             // Propagation error - satellite position not updated
@@ -230,6 +230,22 @@ export class SatelliteEntity {
             meanAnomaly: this.satrec.mo,
             meanMotion: this.satrec.no
         };
+    }
+
+    public getLODData(): SatelliteLOD | null {
+        return this.lodData;
+    }
+
+    public setLODData(lodData: SatelliteLOD): void {
+        this.lodData = lodData;
+    }
+
+    public setVisible(visible: boolean): void {
+        this.mesh.visible = visible;
+    }
+
+    public isVisible(): boolean {
+        return this.mesh.visible;
     }
 
     public dispose(): void {
