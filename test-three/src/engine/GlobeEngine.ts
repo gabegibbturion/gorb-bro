@@ -171,11 +171,11 @@ export class GlobeEngine {
 
     private createLights(): void {
         // Ambient light
-        const ambientLight = new THREE.AmbientLight(0x404040, 5);
+        const ambientLight = new THREE.AmbientLight(0x404040, 15.0);
         this.scene.add(ambientLight);
 
         // Directional light (sun) - position will be calculated based on current time
-        this.sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        this.sunLight = new THREE.DirectionalLight(0xffffff, 5.0);
         this.sunLight.castShadow = true;
         this.sunLight.shadow.mapSize.width = 2048;
         this.sunLight.shadow.mapSize.height = 2048;
@@ -320,6 +320,7 @@ export class GlobeEngine {
 
     private animate(): void {
         if (!this.isRunning) return;
+        let startTime = performance.now();
 
         this.animationId = requestAnimationFrame(() => this.animate());
 
@@ -334,19 +335,35 @@ export class GlobeEngine {
         if (this.controls) {
             this.controls.update();
         }
+        let endTime = performance.now();
+        console.log(`Controls update time: ${endTime - startTime}ms`);
+
+
 
         // Update time
+        startTime = performance.now();
         this.currentTime = new Date(this.currentTime.getTime() + deltaTime * this.timeMultiplier * 1000);
         this.entityManager.setTime(this.currentTime);
+        endTime = performance.now();
+        console.log(`Time update time: ${endTime - startTime}ms`);
 
         // Update sun position based on current time
+        startTime = performance.now();
         this.updateSunPosition();
+        endTime = performance.now();
+        console.log(`Sun position update time: ${endTime - startTime}ms`);
 
+        startTime = performance.now();
         if (this.onTimeUpdate) {
             this.onTimeUpdate(this.currentTime);
         }
+        endTime = performance.now();
+        console.log(`Time update callback time: ${endTime - startTime}ms`);
 
+        startTime = performance.now();
         this.renderer.render(this.scene, this.camera);
+        endTime = performance.now();
+        console.log(`Render time: ${endTime - startTime}ms`);
 
         // End stats
         if (this.stats) {

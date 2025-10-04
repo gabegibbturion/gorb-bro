@@ -60,10 +60,11 @@ export class SatelliteEntity {
         this.createMesh();
         this.createTrail();
         this.createOrbitVisualization();
+        // this.update(new Date());
     }
 
     private createMesh(): void {
-        const geometry = new THREE.SphereGeometry(this.options.size, 8, 6);
+        const geometry = new THREE.SphereGeometry(this.options.size, 6, 8);
         const material = new THREE.MeshBasicMaterial({
             color: this.options.color,
             transparent: true,
@@ -158,7 +159,9 @@ export class SatelliteEntity {
                 satellite.eciToGeodetic(pos, gmst);
 
                 // Update mesh position
-                this.mesh.position.copy(this.currentPosition);
+                this.mesh.position.set(this.currentPosition.x, this.currentPosition.y, this.currentPosition.z);
+
+                // this.mesh.position.copy(this.currentPosition);
             }
         } catch (error) {
             // Propagation error - satellite position not updated

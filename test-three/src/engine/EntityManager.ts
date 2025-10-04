@@ -132,6 +132,7 @@ export class EntityManager {
         this.currentTime = time;
 
         // Update all satellites
+        const startTime = performance.now();
         this.satellites.forEach(satellite => {
             satellite.update(time);
 
@@ -140,6 +141,8 @@ export class EntityManager {
                 this.lodSystem.updateSatellite(satellite.id, satellite.getPosition());
             }
         });
+        const endTime = performance.now();
+        console.log(`LOD System update time: ${endTime - startTime}ms`);
 
         // Apply LOD visibility if system is available
         if (this.lodSystem) {
