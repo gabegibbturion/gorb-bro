@@ -11,7 +11,7 @@ interface ParticleSystemProps {
 
 const ParticleSystem: React.FC<ParticleSystemProps> = ({
     style,
-    particleCount = 100000,
+    particleCount = 1000000,
     autoRotate = false,
     rotationSpeed = 0.001,
     onEngineReady

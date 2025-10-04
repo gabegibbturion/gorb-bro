@@ -149,24 +149,24 @@ export class GlobeEngine {
         return texture;
     }
 
-    private createSkybox(): void {
-        // Create a large sphere for the skybox
-        const skyboxGeometry = new THREE.SphereGeometry(500, 32, 32);
+    // private createSkybox(): void {
+    //     // Create a large sphere for the skybox
+    //     const skyboxGeometry = new THREE.SphereGeometry(500, 32, 32);
 
-        // Load the skybox texture
-        const loader = new THREE.TextureLoader();
-        const skyboxTexture = loader.load('/src/assets/skybox.jpeg');
+    //     // Load the skybox texture
+    //     const loader = new THREE.TextureLoader();
+    //     const skyboxTexture = loader.load('/src/assets/skybox.jpeg');
 
-        // Create material for the skybox
-        const skyboxMaterial = new THREE.MeshBasicMaterial({
-            map: skyboxTexture,
-            side: THREE.BackSide // Render the inside of the sphere
-        });
+    //     // Create material for the skybox
+    //     const skyboxMaterial = new THREE.MeshBasicMaterial({
+    //         map: skyboxTexture,
+    //         side: THREE.BackSide // Render the inside of the sphere
+    //     });
 
-        // Create the skybox mesh
-        const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
-        this.scene.add(skybox);
-    }
+    //     // Create the skybox mesh
+    //     const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+    //     this.scene.add(skybox);
+    // }
 
     private createLights(): void {
         // Ambient light
@@ -189,14 +189,6 @@ export class GlobeEngine {
             maxSatellites: this.options.maxSatellites,
             autoCleanup: true,
             updateInterval: 16 // Update every frame (60fps)
-        });
-
-        // Initialize LOD system with camera
-        this.entityManager.initializeLOD(this.camera, {
-            lodDistances: [0.0005, 0.002, 0.005, .01], // Very aggressive LOD for maximum performance
-            clusterDistance: 1500.0, // Large cluster distance to group more satellites
-            maxVisibleSatellites: 50000, // Much higher limit for instanced rendering
-            useInstancing: true
         });
 
         // Set up entity manager callbacks
@@ -246,24 +238,42 @@ export class GlobeEngine {
         // Update the picking ray with the camera and mouse position
         this.raycaster.setFromCamera(this.mouse, this.camera);
 
-        // Get all satellite meshes for intersection testing
-        const satellites = this.entityManager.getAllSatellites();
-        const satelliteMeshes = satellites.map(sat => sat.getMesh());
+        // Get the particle system from entity manager for intersection testing
+        const particleSystem = this.entityManager.getParticleSystem();
+        if (!particleSystem) {
+            // No satellites to select
+            this.selectEntity(null);
+            return;
+        }
 
         // Calculate objects intersecting the picking ray
-        const intersects = this.raycaster.intersectObjects(satelliteMeshes);
+        const intersects = this.raycaster.intersectObject(particleSystem);
 
         if (intersects.length > 0) {
-            // Find the satellite entity that was clicked
-            const clickedMesh = intersects[0].object;
-            const selectedSatellite = satellites.find(sat => sat.getMesh() === clickedMesh);
+            // Find the closest satellite to the intersection point
+            const intersectionPoint = intersects[0].point;
+            const satellites = this.entityManager.getAllSatellites();
 
-            if (selectedSatellite) {
-                this.selectEntity(selectedSatellite);
+            let closestSatellite: SatelliteEntity | null = null;
+            let closestDistance = Infinity;
+
+            satellites.forEach(satellite => {
+                const satellitePosition = satellite.getPosition();
+                const distance = intersectionPoint.distanceTo(satellitePosition);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestSatellite = satellite;
+                }
+            });
+
+            if (closestSatellite && closestDistance < 0.1) { // Within reasonable selection distance
+                this.selectEntity(closestSatellite);
+            } else {
+                this.selectEntity(null);
             }
         } else {
             // Clicked on empty space, deselect
-            // this.selectEntity(null);
+            this.selectEntity(null);
         }
     }
 
@@ -290,13 +300,11 @@ export class GlobeEngine {
         if (this.isRunning) return;
 
         this.isRunning = true;
-        this.entityManager.startAutoUpdate();
         this.animate();
     }
 
     public stop(): void {
         this.isRunning = false;
-        this.entityManager.stopAutoUpdate();
 
         if (this.animationId) {
             cancelAnimationFrame(this.animationId);
@@ -306,7 +314,6 @@ export class GlobeEngine {
 
     private animate(): void {
         if (!this.isRunning) return;
-        let startTime = performance.now();
 
         this.animationId = requestAnimationFrame(() => this.animate());
 
@@ -321,35 +328,19 @@ export class GlobeEngine {
         if (this.controls) {
             this.controls.update();
         }
-        let endTime = performance.now();
-        // console.log(`Controls update time: ${endTime - startTime}ms`);
-
-
 
         // Update time
-        startTime = performance.now();
         this.currentTime = new Date(this.currentTime.getTime() + deltaTime * this.timeMultiplier * 1000);
         this.entityManager.setTime(this.currentTime);
-        endTime = performance.now();
-        // console.log(`Time update time: ${endTime - startTime}ms`);
 
         // Update sun position based on current time
-        startTime = performance.now();
         this.updateSunPosition();
-        endTime = performance.now();
-        // console.log(`Sun position update time: ${endTime - startTime}ms`);
 
-        startTime = performance.now();
         if (this.onTimeUpdate) {
             this.onTimeUpdate(this.currentTime);
         }
-        endTime = performance.now();
-        // console.log(`Time update callback time: ${endTime - startTime}ms`);
 
-        startTime = performance.now();
         this.renderer.render(this.scene, this.camera);
-        endTime = performance.now();
-        // console.log(`Render time: ${endTime - startTime}ms`);
 
         // End stats
         if (this.stats) {

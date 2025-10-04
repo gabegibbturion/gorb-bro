@@ -1,6 +1,5 @@
 import * as satellite from 'satellite.js';
 import * as THREE from 'three';
-import type { SatelliteLOD } from './LODSystem';
 import { OrbitVisualization } from './OrbitVisualization';
 import type { ClassicalOrbitalElements } from './OrbitalElements';
 
@@ -28,19 +27,15 @@ export class SatelliteEntity {
     public readonly name: string;
     public readonly satrec: any;
 
-    private mesh!: THREE.Points;
     private trail!: THREE.Line;
     private trailGeometry!: THREE.BufferGeometry;
     private trailMaterial!: THREE.LineBasicMaterial;
     private orbitVisualization!: OrbitVisualization;
     private currentCOE!: ClassicalOrbitalElements;
-    private bufferGeometry!: THREE.BufferGeometry;
-    private colorAttribute!: THREE.Float32BufferAttribute;
 
     private options: Required<SatelliteEntityOptions>;
     private currentPosition: THREE.Vector3 = new THREE.Vector3();
     private currentVelocity: THREE.Vector3 = new THREE.Vector3();
-    private lodData: SatelliteLOD | null = null;
 
     constructor(options: SatelliteEntityOptions) {
         this.id = Math.random().toString(36).substr(2, 9);
@@ -59,42 +54,11 @@ export class SatelliteEntity {
             ...options
         };
 
-        this.createMesh();
         this.createTrail();
         this.createOrbitVisualization();
         // this.update(new Date());
     }
 
-    private createMesh(): void {
-        // Create point geometry for better performance
-        this.bufferGeometry = new THREE.BufferGeometry();
-
-        // Create a single point at origin
-        const positions = new Float32Array([0, 0, 0]);
-        this.bufferGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-        // Create color attribute for the point
-        const colors = new Float32Array(3);
-        const color = new THREE.Color(this.options.color);
-        colors[0] = color.r; // Red
-        colors[1] = color.g; // Green
-        colors[2] = color.b; // Blue
-
-        this.colorAttribute = new THREE.Float32BufferAttribute(colors, 3);
-        this.bufferGeometry.setAttribute('color', this.colorAttribute);
-
-        // Create point material
-        const material = new THREE.PointsMaterial({
-            size: this.options.size, // Scale up for visibility
-            vertexColors: true,
-            transparent: true,
-            opacity: 0.9,
-            // sizeAttenuation: true
-        });
-
-        this.mesh = new THREE.Points(this.bufferGeometry, material);
-        this.mesh.userData = { satellite: this };
-    }
 
     private createTrail(): void {
         if (!this.options.showTrail) return;
@@ -178,10 +142,7 @@ export class SatelliteEntity {
                 const gmst = satellite.gstime(time);
                 satellite.eciToGeodetic(pos, gmst);
 
-                // Update mesh position
-                this.mesh.position.set(this.currentPosition.x, this.currentPosition.y, this.currentPosition.z);
-
-                // this.mesh.position.copy(this.currentPosition);
+                // Position is now just stored in currentPosition for the particle system
             }
         } catch (error) {
             // Propagation error - satellite position not updated
@@ -189,9 +150,7 @@ export class SatelliteEntity {
     }
 
 
-    public getMesh(): THREE.Points {
-        return this.mesh;
-    }
+    // No longer returns a mesh - satellites are just data points
 
     public getTrail(): THREE.Line | null {
         return this.trail;
@@ -255,59 +214,23 @@ export class SatelliteEntity {
         };
     }
 
-    public getLODData(): SatelliteLOD | null {
-        return this.lodData;
-    }
 
-    public setLODData(lodData: SatelliteLOD): void {
-        this.lodData = lodData;
-    }
-
-    public setVisible(visible: boolean): void {
-        this.mesh.visible = visible;
+    public setVisible(_visible: boolean): void {
+        // Visibility is now handled by the particle system
     }
 
     public isVisible(): boolean {
-        return this.mesh.visible;
+        return true; // Always visible in particle system
     }
 
-    public setSelected(selected: boolean): void {
-        if (this.mesh && this.mesh.material instanceof THREE.PointsMaterial) {
-            if (selected) {
-                // Highlight selected satellite with a brighter color and larger size
-                this.updateVertexColors(0xffffff);
-                this.mesh.material.size = this.options.size * 2; // Larger size
-            } else {
-                // Reset to original color and size
-                this.updateVertexColors(this.options.color);
-                this.mesh.material.size = this.options.size; // Original size
-            }
-        }
-    }
-
-    private updateVertexColors(color: number): void {
-        if (!this.colorAttribute) return;
-
-        const colorObj = new THREE.Color(color);
-        const colors = this.colorAttribute.array as Float32Array;
-
-        for (let i = 0; i < colors.length; i += 3) {
-            colors[i] = colorObj.r;     // Red
-            colors[i + 1] = colorObj.g; // Green
-            colors[i + 2] = colorObj.b; // Blue
-        }
-
-        this.colorAttribute.needsUpdate = true;
+    public setSelected(_selected: boolean): void {
+        // Selection is now handled by the particle system
+        // Could store selection state for particle system updates
     }
 
     public setColor(color: number): void {
         this.options.color = color;
-        this.updateVertexColors(color);
-
-        // Also update the material color if it's a PointsMaterial
-        if (this.mesh.material instanceof THREE.PointsMaterial) {
-            this.mesh.material.color.setHex(color);
-        }
+        // Color updates will be handled by the particle system
     }
 
     public getColor(): number {
@@ -315,17 +238,6 @@ export class SatelliteEntity {
     }
 
     public dispose(): void {
-        if (this.mesh) {
-            this.mesh.geometry.dispose();
-            if (this.mesh.material instanceof THREE.PointsMaterial) {
-                this.mesh.material.dispose();
-            }
-        }
-
-        if (this.bufferGeometry) {
-            this.bufferGeometry.dispose();
-        }
-
         if (this.trail) {
             this.trail.geometry.dispose();
             if (Array.isArray(this.trail.material)) {

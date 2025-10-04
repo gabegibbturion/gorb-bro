@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { LODSystem } from './LODSystem';
 import type { OrbitalElements } from './OrbitalElements';
 import { OrbitalElementsGenerator } from './OrbitalElements';
 import type { SatelliteEntityOptions } from './SatelliteEntity';
@@ -18,7 +17,11 @@ export class EntityManager {
     private updateTimer: number | null = null;
     private currentTime: Date = new Date();
     private isUpdating: boolean = false;
-    private lodSystem: LODSystem | null = null;
+
+    // Unified particle system for all satellites
+    private particleSystem: THREE.Points | null = null;
+    private particleGeometry: THREE.BufferGeometry | null = null;
+    private particleMaterial: THREE.PointsMaterial | null = null;
 
     // Event callbacks
     private onSatelliteAdded?: (satellite: SatelliteEntity) => void;
@@ -35,9 +38,6 @@ export class EntityManager {
         };
     }
 
-    public initializeLOD(camera: THREE.Camera, config?: Partial<import('./LODSystem').LODConfig>): void {
-        this.lodSystem = new LODSystem(camera, config);
-    }
 
     public addSatellite(orbitalElements: OrbitalElements, options?: Partial<SatelliteEntityOptions>): SatelliteEntity | null {
         if (this.satellites.size >= this.options.maxSatellites) {
@@ -59,8 +59,7 @@ export class EntityManager {
         const satellite = new SatelliteEntity(satelliteOptions);
         this.satellites.set(satellite.id, satellite);
 
-        // Add to scene
-        this.scene.add(satellite.getMesh());
+        // Add trails and orbits to scene (but not individual meshes)
         const trail = satellite.getTrail();
         if (trail) {
             this.scene.add(trail);
@@ -70,6 +69,8 @@ export class EntityManager {
             this.scene.add(orbit);
         }
 
+        // Update particle system
+        this.updateParticleSystem();
 
         // Trigger callback
         if (this.onSatelliteAdded) {
@@ -85,8 +86,7 @@ export class EntityManager {
             return false;
         }
 
-        // Remove from scene
-        this.scene.remove(satellite.getMesh());
+        // Remove trails and orbits from scene
         const trail = satellite.getTrail();
         if (trail) {
             this.scene.remove(trail);
@@ -99,6 +99,9 @@ export class EntityManager {
         // Cleanup
         satellite.dispose();
         this.satellites.delete(id);
+
+        // Update particle system
+        this.updateParticleSystem();
 
         // Trigger callback
         if (this.onSatelliteRemoved) {
@@ -132,22 +135,12 @@ export class EntityManager {
         this.currentTime = time;
 
         // Update all satellites
-        // const startTime = performance.now();
         this.satellites.forEach(satellite => {
             satellite.update(time);
-
-            // Update LOD system if available
-            if (this.lodSystem) {
-                this.lodSystem.updateSatellite(satellite.id, satellite.getPosition());
-            }
         });
-        // const endTime = performance.now();
-        // console.log(`LOD System update time: ${endTime - startTime}ms`);
 
-        // Apply LOD visibility if system is available
-        if (this.lodSystem) {
-            this.applyLODVisibility();
-        }
+        // Update particle system positions
+        this.updateParticleSystem();
 
         // Trigger update callback
         if (this.onUpdate) {
@@ -157,70 +150,102 @@ export class EntityManager {
         this.isUpdating = false;
     }
 
-    private applyLODVisibility(): void {
-        if (!this.lodSystem) return;
+    private updateParticleSystem(): void {
+        const satellites = this.getAllSatellites();
 
-        const visibleSatellites = this.lodSystem.getVisibleSatellites();
-        const lodGroups = this.lodSystem.getLODGroups();
-
-        // Hide all satellites first
-        this.satellites.forEach(satellite => {
-            satellite.setVisible(false);
-        });
-
-        // Process each LOD group for efficient rendering
-        lodGroups.forEach((satellites, lodLevel) => {
-            if (satellites.length === 0) return;
-
-            // Use instanced rendering for better performance
-            if (this.lodSystem!.getRenderingMethod(lodLevel) === 'instanced') {
-                this.renderInstancedGroup(satellites, lodLevel);
-            } else {
-                // Use point cloud for distant satellites
-                this.renderPointCloudGroup(satellites, lodLevel);
+        // Remove existing particle system if no satellites
+        if (satellites.length === 0) {
+            if (this.particleSystem) {
+                this.scene.remove(this.particleSystem);
+                this.particleGeometry?.dispose();
+                this.particleMaterial?.dispose();
+                this.particleSystem = null;
+                this.particleGeometry = null;
+                this.particleMaterial = null;
             }
+            return;
+        }
+
+        // Create or recreate particle system
+        if (!this.particleSystem || this.particleGeometry!.attributes.position.count !== satellites.length) {
+            this.createParticleSystem();
+        }
+
+        // Update positions and colors
+        const positions = new Float32Array(satellites.length * 3);
+        const colors = new Float32Array(satellites.length * 3);
+
+        satellites.forEach((satellite, index) => {
+            const position = satellite.getPosition();
+            const color = new THREE.Color(satellite.getColor());
+
+            // Positions
+            positions[index * 3] = position.x;
+            positions[index * 3 + 1] = position.y;
+            positions[index * 3 + 2] = position.z;
+
+            // Colors
+            colors[index * 3] = color.r;
+            colors[index * 3 + 1] = color.g;
+            colors[index * 3 + 2] = color.b;
         });
 
-        // Show only visible satellites
-        visibleSatellites.forEach(lodData => {
-            const satellite = this.satellites.get(lodData.id);
-            if (satellite) {
-                satellite.setVisible(true);
-                satellite.setLODData(lodData);
-            }
+        // Update geometry attributes
+        this.particleGeometry!.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        this.particleGeometry!.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        this.particleGeometry!.attributes.position.needsUpdate = true;
+        this.particleGeometry!.attributes.color.needsUpdate = true;
+    }
+
+    private createParticleSystem(): void {
+        const satellites = this.getAllSatellites();
+        if (satellites.length === 0) return;
+
+        // Remove existing particle system
+        if (this.particleSystem) {
+            this.scene.remove(this.particleSystem);
+            this.particleGeometry?.dispose();
+            this.particleMaterial?.dispose();
+        }
+
+        // Create geometry
+        this.particleGeometry = new THREE.BufferGeometry();
+
+        const positions = new Float32Array(satellites.length * 3);
+        const colors = new Float32Array(satellites.length * 3);
+
+        satellites.forEach((satellite, index) => {
+            const position = satellite.getPosition();
+            const color = new THREE.Color(satellite.getColor());
+
+            // Positions
+            positions[index * 3] = position.x;
+            positions[index * 3 + 1] = position.y;
+            positions[index * 3 + 2] = position.z;
+
+            // Colors
+            colors[index * 3] = color.r;
+            colors[index * 3 + 1] = color.g;
+            colors[index * 3 + 2] = color.b;
         });
+
+        this.particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        this.particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        this.particleGeometry.computeBoundingSphere();
+
+        // Create material exactly like ParticleEngine
+        this.particleMaterial = new THREE.PointsMaterial({
+            size: 0.01,
+            vertexColors: true,
+            // transparent: true,
+            // opacity: 0.8
+        });
+
+        // Create particle system
+        this.particleSystem = new THREE.Points(this.particleGeometry, this.particleMaterial);
+        this.scene.add(this.particleSystem);
     }
 
-    private renderInstancedGroup(satellites: any[], lodLevel: number): void {
-        // Create or update instanced mesh for this LOD level
-        const instancedMesh = this.lodSystem!.createInstancedMesh(lodLevel, satellites.length);
-        if (instancedMesh) {
-            this.lodSystem!.updateInstancedMesh(instancedMesh, satellites);
-        }
-    }
-
-    private renderPointCloudGroup(satellites: any[], lodLevel: number): void {
-        // Create or update point cloud for this LOD level
-        const pointCloud = this.lodSystem!.createPointCloud(lodLevel, satellites.length);
-        if (pointCloud) {
-            this.lodSystem!.updatePointCloud(pointCloud, satellites);
-        }
-    }
-
-    public startAutoUpdate(): void {
-        if (this.updateTimer) return;
-
-        this.updateTimer = window.setInterval(() => {
-            this.update(new Date());
-        }, this.options.updateInterval);
-    }
-
-    public stopAutoUpdate(): void {
-        if (this.updateTimer) {
-            clearInterval(this.updateTimer);
-            this.updateTimer = null;
-        }
-    }
 
     public setTime(time: Date): void {
         this.currentTime = time;
@@ -231,13 +256,6 @@ export class EntityManager {
         return new Date(this.currentTime);
     }
 
-    public setUpdateInterval(interval: number): void {
-        this.options.updateInterval = interval;
-        if (this.updateTimer) {
-            this.stopAutoUpdate();
-            this.startAutoUpdate();
-        }
-    }
 
     // Event handlers
     public onSatelliteAddedCallback(callback: (satellite: SatelliteEntity) => void): void {
@@ -323,8 +341,7 @@ export class EntityManager {
         const satellite = new SatelliteEntity(satelliteOptions);
         this.satellites.set(satellite.id, satellite);
 
-        // Add to scene
-        this.scene.add(satellite.getMesh());
+        // Add trails and orbits to scene (but not individual meshes)
         const trail = satellite.getTrail();
         if (trail) {
             this.scene.add(trail);
@@ -334,6 +351,8 @@ export class EntityManager {
             this.scene.add(orbit);
         }
 
+        // Update particle system
+        this.updateParticleSystem();
 
         // Trigger callback
         if (this.onSatelliteAdded) {
@@ -343,14 +362,22 @@ export class EntityManager {
         return satellite;
     }
 
+    public getParticleSystem(): THREE.Points | null {
+        return this.particleSystem;
+    }
+
     public dispose(): void {
-        this.stopAutoUpdate();
         this.clearAll();
         this.satellites.clear();
 
-        if (this.lodSystem) {
-            this.lodSystem.dispose();
-            this.lodSystem = null;
+        // Clean up particle system
+        if (this.particleSystem) {
+            this.scene.remove(this.particleSystem);
+            this.particleGeometry?.dispose();
+            this.particleMaterial?.dispose();
+            this.particleSystem = null;
+            this.particleGeometry = null;
+            this.particleMaterial = null;
         }
     }
 }

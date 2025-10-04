@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
 import { GlobeEngine } from '../engine/GlobeEngine';
 import type { ClassicalOrbitalElements } from '../engine/OrbitalElements';
 import { OrbitalElementsGenerator } from '../engine/OrbitalElements';
@@ -136,11 +135,8 @@ export default function Globe({
 
         const satellite = engineRef.current.addRandomSatellite();
         if (satellite) {
-            // Update satellite appearance
-            const mesh = satellite.getMesh();
-            if (mesh.material instanceof THREE.Material) {
-                (mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
-            }
+            // Update satellite color (particle system will handle the visual update)
+            satellite.setColor(color);
         }
     };
 
@@ -153,11 +149,8 @@ export default function Globe({
             const color = colors[i % colors.length];
             const satellite = engineRef.current.addRandomTLEFromCOE();
             if (satellite) {
-                // Update satellite appearance
-                const mesh = satellite.getMesh();
-                if (mesh.material instanceof THREE.Material) {
-                    (mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
-                }
+                // Update satellite color (particle system will handle the visual update)
+                satellite.setColor(color);
             }
         }
     };

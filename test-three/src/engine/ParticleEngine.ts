@@ -34,7 +34,7 @@ export class ParticleEngine {
             width: options.container.clientWidth,
             height: options.container.clientHeight,
             enableControls: true,
-            particleCount: 1000,
+            particleCount: 1000000,
             autoRotate: false,
             rotationSpeed: 0.001,
             ...options
