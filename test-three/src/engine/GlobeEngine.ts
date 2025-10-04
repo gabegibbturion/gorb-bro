@@ -79,7 +79,6 @@ export class GlobeEngine {
         this.createLights();
         this.createEntityManager();
         this.createControls();
-        this.createStats();
         this.setupEventListeners();
 
         if (this.onEngineReady) {
@@ -222,19 +221,6 @@ export class GlobeEngine {
         this.controls.maxDistance = 30;
     }
 
-    private createStats(): void {
-        if (!this.options.enableStats) return;
-
-        this.stats = new Stats();
-        this.stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
-        this.stats.dom.style.position = 'absolute';
-        this.stats.dom.style.top = '0px';
-        this.stats.dom.style.right = '0px';
-        this.stats.dom.style.left = 'auto';
-        this.stats.dom.style.zIndex = '100';
-        this.container.appendChild(this.stats.dom);
-    }
-
 
     private setupEventListeners(): void {
         window.addEventListener('resize', () => this.onWindowResize());
@@ -336,7 +322,7 @@ export class GlobeEngine {
             this.controls.update();
         }
         let endTime = performance.now();
-        console.log(`Controls update time: ${endTime - startTime}ms`);
+        // console.log(`Controls update time: ${endTime - startTime}ms`);
 
 
 
@@ -345,25 +331,25 @@ export class GlobeEngine {
         this.currentTime = new Date(this.currentTime.getTime() + deltaTime * this.timeMultiplier * 1000);
         this.entityManager.setTime(this.currentTime);
         endTime = performance.now();
-        console.log(`Time update time: ${endTime - startTime}ms`);
+        // console.log(`Time update time: ${endTime - startTime}ms`);
 
         // Update sun position based on current time
         startTime = performance.now();
         this.updateSunPosition();
         endTime = performance.now();
-        console.log(`Sun position update time: ${endTime - startTime}ms`);
+        // console.log(`Sun position update time: ${endTime - startTime}ms`);
 
         startTime = performance.now();
         if (this.onTimeUpdate) {
             this.onTimeUpdate(this.currentTime);
         }
         endTime = performance.now();
-        console.log(`Time update callback time: ${endTime - startTime}ms`);
+        // console.log(`Time update callback time: ${endTime - startTime}ms`);
 
         startTime = performance.now();
         this.renderer.render(this.scene, this.camera);
         endTime = performance.now();
-        console.log(`Render time: ${endTime - startTime}ms`);
+        // console.log(`Render time: ${endTime - startTime}ms`);
 
         // End stats
         if (this.stats) {

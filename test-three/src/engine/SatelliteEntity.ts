@@ -28,12 +28,14 @@ export class SatelliteEntity {
     public readonly name: string;
     public readonly satrec: any;
 
-    private mesh!: THREE.Mesh;
+    private mesh!: THREE.Points;
     private trail!: THREE.Line;
     private trailGeometry!: THREE.BufferGeometry;
     private trailMaterial!: THREE.LineBasicMaterial;
     private orbitVisualization!: OrbitVisualization;
     private currentCOE!: ClassicalOrbitalElements;
+    private bufferGeometry!: THREE.BufferGeometry;
+    private colorAttribute!: THREE.Float32BufferAttribute;
 
     private options: Required<SatelliteEntityOptions>;
     private currentPosition: THREE.Vector3 = new THREE.Vector3();
@@ -64,16 +66,34 @@ export class SatelliteEntity {
     }
 
     private createMesh(): void {
-        const geometry = new THREE.SphereGeometry(this.options.size, 6, 8);
-        const material = new THREE.MeshBasicMaterial({
-            color: this.options.color,
+        // Create point geometry for better performance
+        this.bufferGeometry = new THREE.BufferGeometry();
+
+        // Create a single point at origin
+        const positions = new Float32Array([0, 0, 0]);
+        this.bufferGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        // Create color attribute for the point
+        const colors = new Float32Array(3);
+        const color = new THREE.Color(this.options.color);
+        colors[0] = color.r; // Red
+        colors[1] = color.g; // Green
+        colors[2] = color.b; // Blue
+
+        this.colorAttribute = new THREE.Float32BufferAttribute(colors, 3);
+        this.bufferGeometry.setAttribute('color', this.colorAttribute);
+
+        // Create point material
+        const material = new THREE.PointsMaterial({
+            size: this.options.size, // Scale up for visibility
+            vertexColors: true,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.9,
+            // sizeAttenuation: true
         });
 
-        this.mesh = new THREE.Mesh(geometry, material);
+        this.mesh = new THREE.Points(this.bufferGeometry, material);
         this.mesh.userData = { satellite: this };
-
     }
 
     private createTrail(): void {
@@ -169,7 +189,7 @@ export class SatelliteEntity {
     }
 
 
-    public getMesh(): THREE.Mesh {
+    public getMesh(): THREE.Points {
         return this.mesh;
     }
 
@@ -252,27 +272,58 @@ export class SatelliteEntity {
     }
 
     public setSelected(selected: boolean): void {
-        if (this.mesh && this.mesh.material instanceof THREE.MeshBasicMaterial) {
+        if (this.mesh && this.mesh.material instanceof THREE.PointsMaterial) {
             if (selected) {
                 // Highlight selected satellite with a brighter color and larger size
-                this.mesh.material.color.setHex(0xffffff);
-                this.mesh.scale.setScalar(1.5);
+                this.updateVertexColors(0xffffff);
+                this.mesh.material.size = this.options.size * 2; // Larger size
             } else {
                 // Reset to original color and size
-                this.mesh.material.color.setHex(this.options.color);
-                this.mesh.scale.setScalar(1.0);
+                this.updateVertexColors(this.options.color);
+                this.mesh.material.size = this.options.size; // Original size
             }
         }
+    }
+
+    private updateVertexColors(color: number): void {
+        if (!this.colorAttribute) return;
+
+        const colorObj = new THREE.Color(color);
+        const colors = this.colorAttribute.array as Float32Array;
+
+        for (let i = 0; i < colors.length; i += 3) {
+            colors[i] = colorObj.r;     // Red
+            colors[i + 1] = colorObj.g; // Green
+            colors[i + 2] = colorObj.b; // Blue
+        }
+
+        this.colorAttribute.needsUpdate = true;
+    }
+
+    public setColor(color: number): void {
+        this.options.color = color;
+        this.updateVertexColors(color);
+
+        // Also update the material color if it's a PointsMaterial
+        if (this.mesh.material instanceof THREE.PointsMaterial) {
+            this.mesh.material.color.setHex(color);
+        }
+    }
+
+    public getColor(): number {
+        return this.options.color;
     }
 
     public dispose(): void {
         if (this.mesh) {
             this.mesh.geometry.dispose();
-            if (Array.isArray(this.mesh.material)) {
-                this.mesh.material.forEach(material => material.dispose());
-            } else {
+            if (this.mesh.material instanceof THREE.PointsMaterial) {
                 this.mesh.material.dispose();
             }
+        }
+
+        if (this.bufferGeometry) {
+            this.bufferGeometry.dispose();
         }
 
         if (this.trail) {

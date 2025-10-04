@@ -1,31 +1,22 @@
-import { useState } from 'react'
-import './App.css'
-import Globe from './components/Globe'
+import { Route, Routes } from 'react-router-dom';
+import './App.css';
+import Navigation from './components/Navigation';
+import GlobePage from './pages/GlobePage';
+import HomePage from './pages/HomePage';
+import ParticlesPage from './pages/ParticlesPage';
 
 function App() {
-  const [_engine, setEngine] = useState<any>(null)
-
-  const handleEngineReady = (globeEngine: any) => {
-    setEngine(globeEngine)
-  }
-
-  const handleSatelliteUpdate = (_satellites: any[]) => {
-  }
-
-  const handleTimeUpdate = (_time: Date) => {
-    // Optional: Handle time updates
-  }
-
   return (
-    <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}>
-      <Globe
-        style={{ width: '100%', height: '100%' }}
-        onEngineReady={handleEngineReady}
-        onSatelliteUpdate={handleSatelliteUpdate}
-        onTimeUpdate={handleTimeUpdate}
-      />
+    <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, position: 'relative' }}>
+      <Navigation />
+
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/globe" element={<GlobePage />} />
+        <Route path="/particles" element={<ParticlesPage />} />
+      </Routes>
     </div>
-  )
+  );
 }
 
 export default App
