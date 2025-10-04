@@ -14,7 +14,6 @@ export class EntityManager {
     private satellites: Map<string, SatelliteEntity> = new Map();
     private scene: THREE.Scene;
     private options: Required<EntityManagerOptions>;
-    private updateTimer: number | null = null;
     private currentTime: Date = new Date();
     private isUpdating: boolean = false;
 
@@ -22,6 +21,7 @@ export class EntityManager {
     private particleSystem: THREE.Points | null = null;
     private particleGeometry: THREE.BufferGeometry | null = null;
     private particleMaterial: THREE.PointsMaterial | null = null;
+    private currentParticleCount: number = 0;
 
     // Event callbacks
     private onSatelliteAdded?: (satellite: SatelliteEntity) => void;
@@ -60,14 +60,14 @@ export class EntityManager {
         this.satellites.set(satellite.id, satellite);
 
         // Add trails and orbits to scene (but not individual meshes)
-        const trail = satellite.getTrail();
-        if (trail) {
-            this.scene.add(trail);
-        }
-        const orbit = satellite.getOrbitVisualization();
-        if (orbit) {
-            this.scene.add(orbit);
-        }
+        // const trail = satellite.getTrail();
+        // if (trail) {
+        //     this.scene.add(trail);
+        // }
+        // const orbit = satellite.getOrbitVisualization();
+        // if (orbit) {
+        //     this.scene.add(orbit);
+        // }
 
         // Update particle system
         this.updateParticleSystem();
@@ -162,39 +162,66 @@ export class EntityManager {
                 this.particleSystem = null;
                 this.particleGeometry = null;
                 this.particleMaterial = null;
+                this.currentParticleCount = 0;
             }
             return;
         }
 
-        // Create or recreate particle system
-        if (!this.particleSystem || this.particleGeometry!.attributes.position.count !== satellites.length) {
+        // Only create particle system if it doesn't exist
+        if (!this.particleSystem) {
             this.createParticleSystem();
         }
 
-        // Update positions and colors
-        const positions = new Float32Array(satellites.length * 3);
-        const colors = new Float32Array(satellites.length * 3);
+        // Update current particle count
+        this.currentParticleCount = satellites.length;
 
+        // Update positions and colors efficiently
+        this.updateParticlePositions(satellites);
+    }
+
+    private updateParticlePositions(satellites: SatelliteEntity[]): void {
+        if (!this.particleSystem || !this.particleGeometry) return;
+
+        const positionAttribute = this.particleGeometry.attributes.position as THREE.BufferAttribute;
+        const colorAttribute = this.particleGeometry.attributes.color as THREE.BufferAttribute;
+
+        // Get the underlying arrays for direct manipulation
+        const positions = positionAttribute.array as Float32Array;
+        const colors = colorAttribute.array as Float32Array;
+
+        // Update positions and colors for active satellites
         satellites.forEach((satellite, index) => {
-            const position = satellite.getPosition();
+            // Use direct position reference for better performance
+            const position = satellite.getPositionDirect();
             const color = new THREE.Color(satellite.getColor());
 
-            // Positions
+            // Update positions directly in the buffer
             positions[index * 3] = position.x;
             positions[index * 3 + 1] = position.y;
             positions[index * 3 + 2] = position.z;
 
-            // Colors
+            // Update colors directly in the buffer
             colors[index * 3] = color.r;
             colors[index * 3 + 1] = color.g;
             colors[index * 3 + 2] = color.b;
         });
 
-        // Update geometry attributes
-        this.particleGeometry!.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        this.particleGeometry!.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        this.particleGeometry!.attributes.position.needsUpdate = true;
-        this.particleGeometry!.attributes.color.needsUpdate = true;
+        // Hide unused particles by setting them to a far position
+        for (let i = satellites.length; i < this.options.maxSatellites; i++) {
+            // Move unused particles far away (they won't be visible)
+            positions[i * 3] = 10000;
+            positions[i * 3 + 1] = 10000;
+            positions[i * 3 + 2] = 10000;
+
+            // Set unused particles to transparent (black with zero alpha would be better, but we'll use black)
+            colors[i * 3] = 0;
+            colors[i * 3 + 1] = 0;
+            colors[i * 3 + 2] = 0;
+        }
+
+        // Mark attributes as needing update
+        positionAttribute.needsUpdate = true;
+        colorAttribute.needsUpdate = true;
     }
 
     private createParticleSystem(): void {
@@ -208,26 +235,14 @@ export class EntityManager {
             this.particleMaterial?.dispose();
         }
 
-        // Create geometry
+        // Create geometry with a larger buffer to accommodate dynamic satellite counts
+        // Use maxSatellites as the buffer size to avoid frequent recreations
+        const maxParticles = this.options.maxSatellites;
         this.particleGeometry = new THREE.BufferGeometry();
 
-        const positions = new Float32Array(satellites.length * 3);
-        const colors = new Float32Array(satellites.length * 3);
-
-        satellites.forEach((satellite, index) => {
-            const position = satellite.getPosition();
-            const color = new THREE.Color(satellite.getColor());
-
-            // Positions
-            positions[index * 3] = position.x;
-            positions[index * 3 + 1] = position.y;
-            positions[index * 3 + 2] = position.z;
-
-            // Colors
-            colors[index * 3] = color.r;
-            colors[index * 3 + 1] = color.g;
-            colors[index * 3 + 2] = color.b;
-        });
+        // Initialize with maximum possible particles (all zeros initially)
+        const positions = new Float32Array(maxParticles * 3);
+        const colors = new Float32Array(maxParticles * 3);
 
         this.particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         this.particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -244,6 +259,9 @@ export class EntityManager {
         // Create particle system
         this.particleSystem = new THREE.Points(this.particleGeometry, this.particleMaterial);
         this.scene.add(this.particleSystem);
+
+        // Update positions for current satellites
+        this.updateParticlePositions(satellites);
     }
 
 
@@ -364,6 +382,18 @@ export class EntityManager {
 
     public getParticleSystem(): THREE.Points | null {
         return this.particleSystem;
+    }
+
+    public getParticleSystemInfo(): {
+        particleCount: number;
+        maxParticles: number;
+        isOptimized: boolean
+    } {
+        return {
+            particleCount: this.currentParticleCount,
+            maxParticles: this.options.maxSatellites,
+            isOptimized: this.particleSystem !== null
+        };
     }
 
     public dispose(): void {

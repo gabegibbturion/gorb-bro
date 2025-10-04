@@ -36,6 +36,7 @@ export class SatelliteEntity {
     private options: Required<SatelliteEntityOptions>;
     private currentPosition: THREE.Vector3 = new THREE.Vector3();
     private currentVelocity: THREE.Vector3 = new THREE.Vector3();
+    private lastUpdateTime: Date | null = null;
 
     constructor(options: SatelliteEntityOptions) {
         this.id = Math.random().toString(36).substr(2, 9);
@@ -108,6 +109,11 @@ export class SatelliteEntity {
     }
 
     public update(time: Date): void {
+        // Skip update if time hasn't changed significantly (performance optimization)
+        if (this.lastUpdateTime && Math.abs(time.getTime() - this.lastUpdateTime.getTime()) < 100) {
+            return;
+        }
+
         try {
             // Propagate satellite position using satellite.js
             const positionAndVelocity = satellite.propagate(this.satrec, time);
@@ -138,11 +144,7 @@ export class SatelliteEntity {
                     vel.z * scaleFactor
                 );
 
-                // Calculate geodetic coordinates for location display
-                const gmst = satellite.gstime(time);
-                satellite.eciToGeodetic(pos, gmst);
-
-                // Position is now just stored in currentPosition for the particle system
+                this.lastUpdateTime = time;
             }
         } catch (error) {
             // Propagation error - satellite position not updated
@@ -197,6 +199,11 @@ export class SatelliteEntity {
 
     public getPosition(): THREE.Vector3 {
         return this.currentPosition.clone();
+    }
+
+    public getPositionDirect(): THREE.Vector3 {
+        // Return direct reference for performance-critical operations
+        return this.currentPosition;
     }
 
     public getVelocity(): THREE.Vector3 {
