@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { GlobeEngine } from '../engine/GlobeEngine';
-import type { ClassicalOrbitalElements } from '../engine/OrbitalElements';
-import { OrbitalElementsGenerator } from '../engine/OrbitalElements';
+import React, { useEffect, useRef, useState } from "react";
+import { GlobeEngine } from "../engine/GlobeEngine";
+import type { ClassicalOrbitalElements } from "../engine/OrbitalElements";
+import { OrbitalElementsGenerator } from "../engine/OrbitalElements";
 
 interface GlobeProps {
     style?: React.CSSProperties;
@@ -17,26 +17,20 @@ const sampleSatellites: ClassicalOrbitalElements[] = [
     OrbitalElementsGenerator.generateRandomCOE("HST", [540, 560]),
     OrbitalElementsGenerator.generateRandomCOE("GPS IIF-12", [20000, 20100]),
     OrbitalElementsGenerator.generateRandomCOE("NOAA-18", [800, 850]),
-    OrbitalElementsGenerator.generateRandomCOE("LANDSAT-8", [700, 750])
+    OrbitalElementsGenerator.generateRandomCOE("LANDSAT-8", [700, 750]),
 ];
 
-export default function Globe({
-    style,
-    className,
-    onEngineReady,
-    onSatelliteUpdate,
-    onTimeUpdate
-}: GlobeProps) {
+export default function Globe({ style, className, onEngineReady, onSatelliteUpdate, onTimeUpdate }: GlobeProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const engineRef = useRef<GlobeEngine | null>(null);
     const [isReady, setIsReady] = useState(false);
     const [satelliteCount, setSatelliteCount] = useState(0);
     const [currentTime, setCurrentTime] = useState(new Date());
-    const [_satelliteLocations, setSatelliteLocations] = useState<{ [key: string]: { latitude: number, longitude: number, altitude: number } }>({});
+    const [_satelliteLocations, setSatelliteLocations] = useState<{ [key: string]: { latitude: number; longitude: number; altitude: number } }>({});
     const [isPaused, setIsPaused] = useState(false);
     const [timeMultiplier, setTimeMultiplier] = useState(1);
     const [showOrbits, setShowOrbits] = useState(false);
-    const [satelliteCountInput, setSatelliteCountInput] = useState(1000);
+    const [satelliteCountInput, setSatelliteCountInput] = useState<any>(1000);
     const [selectedEntity, setSelectedEntity] = useState<any>(null);
     const [showSidePanel, setShowSidePanel] = useState(false);
 
@@ -50,7 +44,7 @@ export default function Globe({
             enableStats: true, // Enable stats.js FPS monitor
             autoRotate: false, // Disable auto-rotation
             rotationSpeed: 0.0005,
-            maxSatellites: 2000000
+            maxSatellites: 2000000,
         });
 
         // Set up event handlers
@@ -69,8 +63,8 @@ export default function Globe({
             setSatelliteCount(satellites.length);
 
             // Update satellite locations
-            const locations: { [key: string]: { latitude: number, longitude: number, altitude: number } } = {};
-            satellites.forEach(satellite => {
+            const locations: { [key: string]: { latitude: number; longitude: number; altitude: number } } = {};
+            satellites.forEach((satellite) => {
                 const location = satellite.getCurrentLocation();
                 if (location) {
                     locations[satellite.id] = location;
@@ -94,7 +88,6 @@ export default function Globe({
             setSelectedEntity(entity);
             setShowSidePanel(entity !== null);
         });
-
 
         engineRef.current = engine;
         engine.start();
@@ -120,7 +113,7 @@ export default function Globe({
                 size: 0.01 + Math.random() * 0.01, // Much smaller for scaled coordinates
                 showTrail: false, // Temporarily disabled
                 trailLength: 50 + Math.random() * 100,
-                trailColor: color
+                trailColor: color,
             });
             if (satellite) {
             }
@@ -169,11 +162,10 @@ export default function Globe({
         if (!engineRef.current) return;
 
         const satellites = engineRef.current.getAllSatellites();
-        satellites.forEach(satellite => {
+        satellites.forEach((satellite) => {
             engineRef.current!.removeSatellite(satellite.id);
         });
     };
-
 
     const handleSetTimeMultiplier = (multiplier: number) => {
         if (!engineRef.current) return;
@@ -225,7 +217,7 @@ export default function Globe({
             { name: "LANDSAT", altitude: [700, 750], color: 0xff00ff },
             { name: "SENTINEL", altitude: [780, 800], color: 0x00ffff },
             { name: "TERRA", altitude: [700, 720], color: 0xff8800 },
-            { name: "AQUA", altitude: [700, 720], color: 0x8800ff }
+            { name: "AQUA", altitude: [700, 720], color: 0x8800ff },
         ];
 
         satelliteConfigs.forEach((config) => {
@@ -235,7 +227,7 @@ export default function Globe({
                 size: 0.01 + Math.random() * 0.005,
                 showTrail: false, // Temporarily disabled
                 trailLength: 100 + Math.random() * 50,
-                trailColor: config.color
+                trailColor: config.color,
             });
 
             if (satellite) {
@@ -247,7 +239,7 @@ export default function Globe({
         if (!engineRef.current) return;
 
         const satellites = engineRef.current.getAllSatellites();
-        satellites.forEach(satellite => {
+        satellites.forEach((satellite) => {
             satellite.toggleOrbitVisibility();
         });
 
@@ -255,63 +247,60 @@ export default function Globe({
     };
 
     return (
-        <div style={{ position: 'relative', width: '100%', height: '100%', ...style }} className={className}>
+        <div style={{ position: "relative", width: "100%", height: "100%", ...style }} className={className}>
             {/* Globe container */}
             <div
                 ref={containerRef}
                 style={{
-                    width: '100%',
-                    height: '100%',
-                    background: 'linear-gradient(135deg, #000011 0%, #000033 100%)'
+                    width: "100%",
+                    height: "100%",
+                    background: "linear-gradient(135deg, #000011 0%, #000033 100%)",
                 }}
             />
 
             {/* Control panel */}
-            <div style={{
-                position: 'absolute',
-                top: '10px',
-                left: '10px',
-                background: 'rgba(0, 0, 0, 0.7)',
-                color: 'white',
-                padding: '10px',
-                borderRadius: '5px',
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                minWidth: '200px'
-            }}>
-                <div>Status: {isReady ? 'Ready' : 'Loading...'}</div>
+            <div
+                style={{
+                    position: "absolute",
+                    top: "10px",
+                    left: "10px",
+                    background: "rgba(0, 0, 0, 0.7)",
+                    color: "white",
+                    padding: "10px",
+                    borderRadius: "5px",
+                    fontFamily: "monospace",
+                    fontSize: "12px",
+                    minWidth: "200px",
+                }}
+            >
+                <div>Status: {isReady ? "Ready" : "Loading..."}</div>
                 <div>Satellites: {satelliteCount}</div>
                 <div>Time: {currentTime.toLocaleString()}</div>
-                <div>Speed: {timeMultiplier}x {isPaused ? '(Paused)' : ''}</div>
+                <div>
+                    Speed: {timeMultiplier}x {isPaused ? "(Paused)" : ""}
+                </div>
 
-                <div style={{ marginTop: '10px' }}>
-                    <div style={{ marginBottom: '5px', fontWeight: 'bold' }}>Satellite Controls:</div>
-                    <div style={{ marginBottom: '5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <div style={{ marginTop: "10px" }}>
+                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Satellite Controls:</div>
+                    <div style={{ marginBottom: "5px", display: "flex", alignItems: "center", gap: "5px" }}>
                         <input
-                            type="number"
                             value={satelliteCountInput}
-                            onChange={(e) => setSatelliteCountInput(Math.max(1, parseInt(e.target.value) || 1))}
-                            min="1"
-                            max="1000"
+                            onChange={(e) => setSatelliteCountInput(e.target.value)}
+                            min="-1000"
+                            max="10000"
                             style={{
-                                width: '60px',
-                                padding: '2px',
-                                fontSize: '10px',
-                                border: '1px solid #ccc',
-                                borderRadius: '3px'
+                                width: "60px",
+                                padding: "2px",
+                                fontSize: "10px",
+                                border: "1px solid #ccc",
+                                borderRadius: "3px",
                             }}
                         />
-                        <button
-                            onClick={addMultipleSatellites}
-                            style={{ margin: '2px', padding: '5px', fontSize: '10px', backgroundColor: '#4CAF50' }}
-                        >
+                        <button onClick={addMultipleSatellites} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: "#4CAF50" }}>
                             Add {satelliteCountInput} Satellites
                         </button>
                     </div>
-                    <button
-                        onClick={addRandomSatellite}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={addRandomSatellite} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         Add Single Satellite
                     </button>
                     <button
@@ -320,7 +309,7 @@ export default function Globe({
                                 engineRef.current.addValidSatellite();
                             }
                         }}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px" }}
                     >
                         Add Valid TLE
                     </button>
@@ -332,88 +321,52 @@ export default function Globe({
                                 }
                             }
                         }}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px', backgroundColor: '#2196F3' }}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: "#2196F3" }}
                     >
                         Add Random TLE
                     </button>
-                    <button
-                        onClick={populateGlobe}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px', backgroundColor: '#4CAF50' }}
-                    >
+                    <button onClick={populateGlobe} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: "#4CAF50" }}>
                         Populate Globe
                     </button>
-                    <button
-                        onClick={removeRandomSatellite}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={removeRandomSatellite} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         Remove Random
                     </button>
-                    <button
-                        onClick={clearAllSatellites}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={clearAllSatellites} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         Clear All
                     </button>
-                    <button
-                        onClick={toggleOrbits}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px', backgroundColor: showOrbits ? '#4CAF50' : '#666' }}
-                    >
-                        {showOrbits ? 'Hide Orbits' : 'Show Orbits'}
+                    <button onClick={toggleOrbits} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: showOrbits ? "#4CAF50" : "#666" }}>
+                        {showOrbits ? "Hide Orbits" : "Show Orbits"}
                     </button>
                 </div>
 
-                <div style={{ marginTop: '10px' }}>
-                    <div style={{ marginBottom: '5px', fontWeight: 'bold' }}>Time Controls:</div>
-                    <button
-                        onClick={togglePause}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px', backgroundColor: isPaused ? '#4CAF50' : '#f44336' }}
-                    >
-                        {isPaused ? 'Play' : 'Pause'}
+                <div style={{ marginTop: "10px" }}>
+                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Time Controls:</div>
+                    <button onClick={togglePause} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: isPaused ? "#4CAF50" : "#f44336" }}>
+                        {isPaused ? "Play" : "Pause"}
                     </button>
-                    <button
-                        onClick={rewind}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={rewind} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         ⏪ Rewind
                     </button>
-                    <button
-                        onClick={fastForward}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={fastForward} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         ⏩ Fast Forward
                     </button>
-                    <button
-                        onClick={resetTime}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={resetTime} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         🔄 Reset
                     </button>
                 </div>
 
-                <div style={{ marginTop: '10px' }}>
-                    <div style={{ marginBottom: '5px', fontWeight: 'bold' }}>Speed:</div>
-                    <button
-                        onClick={() => handleSetTimeMultiplier(1)}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                <div style={{ marginTop: "10px" }}>
+                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Speed:</div>
+                    <button onClick={() => handleSetTimeMultiplier(1)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         1x
                     </button>
-                    <button
-                        onClick={() => handleSetTimeMultiplier(10)}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={() => handleSetTimeMultiplier(10)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         10x
                     </button>
-                    <button
-                        onClick={() => handleSetTimeMultiplier(100)}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={() => handleSetTimeMultiplier(100)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         100x
                     </button>
-                    <button
-                        onClick={() => handleSetTimeMultiplier(1000)}
-                        style={{ margin: '2px', padding: '5px', fontSize: '10px' }}
-                    >
+                    <button onClick={() => handleSetTimeMultiplier(1000)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
                         1000x
                     </button>
                 </div>
@@ -452,25 +405,27 @@ export default function Globe({
 
             {/* Side Panel for Selected Entity */}
             {showSidePanel && selectedEntity && (
-                <div style={{
-                    position: 'absolute',
-                    top: '10px',
-                    right: '10px',
-                    background: 'rgba(0, 0, 0, 0.9)',
-                    color: 'white',
-                    padding: '15px',
-                    borderRadius: '8px',
-                    fontFamily: 'monospace',
-                    fontSize: '12px',
-                    minWidth: '300px',
-                    maxWidth: '400px',
-                    maxHeight: '80vh',
-                    overflow: 'auto',
-                    border: '2px solid #4CAF50',
-                    zIndex: 1000
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <h3 style={{ margin: 0, color: '#4CAF50' }}>Satellite Details</h3>
+                <div
+                    style={{
+                        position: "absolute",
+                        top: "10px",
+                        right: "10px",
+                        background: "rgba(0, 0, 0, 0.9)",
+                        color: "white",
+                        padding: "15px",
+                        borderRadius: "8px",
+                        fontFamily: "monospace",
+                        fontSize: "12px",
+                        minWidth: "300px",
+                        maxWidth: "400px",
+                        maxHeight: "80vh",
+                        overflow: "auto",
+                        border: "2px solid #4CAF50",
+                        zIndex: 1000,
+                    }}
+                >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                        <h3 style={{ margin: 0, color: "#4CAF50" }}>Satellite Details</h3>
                         <button
                             onClick={() => {
                                 if (engineRef.current) {
@@ -478,108 +433,98 @@ export default function Globe({
                                 }
                             }}
                             style={{
-                                background: '#f44336',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '3px',
-                                padding: '5px 10px',
-                                cursor: 'pointer',
-                                fontSize: '10px'
+                                background: "#f44336",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "3px",
+                                padding: "5px 10px",
+                                cursor: "pointer",
+                                fontSize: "10px",
                             }}
                         >
                             ✕ Close
                         </button>
                     </div>
 
-                    <div style={{ marginBottom: '10px' }}>
+                    <div style={{ marginBottom: "10px" }}>
                         <strong>Name:</strong> {selectedEntity.name}
                     </div>
 
-                    <div style={{ marginBottom: '10px' }}>
+                    <div style={{ marginBottom: "10px" }}>
                         <strong>ID:</strong> {selectedEntity.id}
                     </div>
 
                     {selectedEntity.getCurrentLocation && (
-                        <div style={{ marginBottom: '10px' }}>
+                        <div style={{ marginBottom: "10px" }}>
                             <strong>Current Position:</strong>
                             {(() => {
                                 try {
                                     const location = selectedEntity.getCurrentLocation();
-                                    return location && typeof location.latitude === 'number' && typeof location.longitude === 'number' && typeof location.altitude === 'number' ? (
-                                        <div style={{ marginLeft: '10px', fontSize: '11px' }}>
+                                    return location && typeof location.latitude === "number" && typeof location.longitude === "number" && typeof location.altitude === "number" ? (
+                                        <div style={{ marginLeft: "10px", fontSize: "11px" }}>
                                             <div>Lat: {location.latitude.toFixed(4)}°</div>
                                             <div>Lon: {location.longitude.toFixed(4)}°</div>
                                             <div>Alt: {location.altitude.toFixed(2)} km</div>
                                         </div>
                                     ) : (
-                                        <div style={{ marginLeft: '10px', fontSize: '11px', color: '#ff9800' }}>
-                                            Position not available
-                                        </div>
+                                        <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Position not available</div>
                                     );
                                 } catch (error) {
-                                    return (
-                                        <div style={{ marginLeft: '10px', fontSize: '11px', color: '#ff9800' }}>
-                                            Error getting position
-                                        </div>
-                                    );
+                                    return <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Error getting position</div>;
                                 }
                             })()}
                         </div>
                     )}
 
                     {selectedEntity.getOrbitalElements && (
-                        <div style={{ marginBottom: '10px' }}>
+                        <div style={{ marginBottom: "10px" }}>
                             <strong>Orbital Elements:</strong>
                             {(() => {
                                 try {
                                     const coe = selectedEntity.getOrbitalElements();
                                     return coe ? (
-                                        <div style={{ marginLeft: '10px', fontSize: '11px' }}>
-                                            <div>Inclination: {coe.inclination ? (coe.inclination * 180 / Math.PI).toFixed(2) : 'N/A'}°</div>
-                                            <div>RAAN: {coe.rightAscension ? (coe.rightAscension * 180 / Math.PI).toFixed(2) : 'N/A'}°</div>
-                                            <div>Eccentricity: {coe.eccentricity ? coe.eccentricity.toFixed(6) : 'N/A'}</div>
-                                            <div>Argument of perigee: {coe.argumentOfPerigee ? (coe.argumentOfPerigee * 180 / Math.PI).toFixed(2) : 'N/A'}°</div>
-                                            <div>Mean anomaly: {coe.meanAnomaly ? (coe.meanAnomaly * 180 / Math.PI).toFixed(2) : 'N/A'}°</div>
-                                            <div>Mean motion: {coe.meanMotion ? coe.meanMotion.toFixed(8) : 'N/A'} rev/day</div>
+                                        <div style={{ marginLeft: "10px", fontSize: "11px" }}>
+                                            <div>Inclination: {coe.inclination ? ((coe.inclination * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
+                                            <div>RAAN: {coe.rightAscension ? ((coe.rightAscension * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
+                                            <div>Eccentricity: {coe.eccentricity ? coe.eccentricity.toFixed(6) : "N/A"}</div>
+                                            <div>Argument of perigee: {coe.argumentOfPerigee ? ((coe.argumentOfPerigee * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
+                                            <div>Mean anomaly: {coe.meanAnomaly ? ((coe.meanAnomaly * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
+                                            <div>Mean motion: {coe.meanMotion ? coe.meanMotion.toFixed(8) : "N/A"} rev/day</div>
                                         </div>
                                     ) : (
-                                        <div style={{ marginLeft: '10px', fontSize: '11px', color: '#ff9800' }}>
-                                            Orbital elements not available
-                                        </div>
+                                        <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Orbital elements not available</div>
                                     );
                                 } catch (error) {
-                                    return (
-                                        <div style={{ marginLeft: '10px', fontSize: '11px', color: '#ff9800' }}>
-                                            Error getting orbital elements
-                                        </div>
-                                    );
+                                    return <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Error getting orbital elements</div>;
                                 }
                             })()}
                         </div>
                     )}
 
-                    <div style={{ marginTop: '15px', padding: '10px', background: 'rgba(76, 175, 80, 0.1)', borderRadius: '5px' }}>
-                        <div style={{ fontSize: '11px', color: '#4CAF50' }}>
-                            💡 Click anywhere on the screen to deselect
-                        </div>
+                    <div style={{ marginTop: "15px", padding: "10px", background: "rgba(76, 175, 80, 0.1)", borderRadius: "5px" }}>
+                        <div style={{ fontSize: "11px", color: "#4CAF50" }}>💡 Click anywhere on the screen to deselect</div>
                     </div>
                 </div>
             )}
 
             {/* Instructions */}
-            <div style={{
-                position: 'absolute',
-                bottom: '10px',
-                left: '10px',
-                background: 'rgba(0, 0, 0, 0.7)',
-                color: 'white',
-                padding: '10px',
-                borderRadius: '5px',
-                fontFamily: 'monospace',
-                fontSize: '11px',
-                maxWidth: '300px'
-            }}>
-                <div><strong>Controls:</strong></div>
+            <div
+                style={{
+                    position: "absolute",
+                    bottom: "10px",
+                    left: "10px",
+                    background: "rgba(0, 0, 0, 0.7)",
+                    color: "white",
+                    padding: "10px",
+                    borderRadius: "5px",
+                    fontFamily: "monospace",
+                    fontSize: "11px",
+                    maxWidth: "300px",
+                }}
+            >
+                <div>
+                    <strong>Controls:</strong>
+                </div>
                 <div>• Mouse: Rotate camera around globe</div>
                 <div>• Wheel: Zoom in/out</div>
                 <div>• Click satellites to view details</div>
@@ -589,4 +534,3 @@ export default function Globe({
         </div>
     );
 }
-
