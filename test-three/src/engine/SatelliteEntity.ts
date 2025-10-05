@@ -37,6 +37,8 @@ export class SatelliteEntity {
     private currentPosition: THREE.Vector3 = new THREE.Vector3();
     private currentVelocity: THREE.Vector3 = new THREE.Vector3();
     private lastUpdateTime: Date | null = null;
+    private isSelected: boolean = false;
+    private isVisible: boolean = true;
 
     constructor(options: SatelliteEntityOptions) {
         this.id = Math.random().toString(36).substr(2, 9);
@@ -222,17 +224,20 @@ export class SatelliteEntity {
     }
 
 
-    public setVisible(_visible: boolean): void {
-        // Visibility is now handled by the particle system
+    public setVisible(visible: boolean): void {
+        this.isVisible = visible;
     }
 
     public isVisible(): boolean {
-        return true; // Always visible in particle system
+        return this.isVisible;
     }
 
-    public setSelected(_selected: boolean): void {
-        // Selection is now handled by the particle system
-        // Could store selection state for particle system updates
+    public setSelected(selected: boolean): void {
+        this.isSelected = selected;
+    }
+
+    public getSelected(): boolean {
+        return this.isSelected;
     }
 
     public setColor(color: number): void {

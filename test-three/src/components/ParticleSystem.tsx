@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { ParticleEngine } from '../engine/ParticleEngine';
+import React, { useEffect, useRef } from "react";
+import { ParticleEngine } from "../engine/ParticleEngine";
 
 interface ParticleSystemProps {
     style?: React.CSSProperties;
@@ -9,13 +9,7 @@ interface ParticleSystemProps {
     onEngineReady?: (engine: ParticleEngine) => void;
 }
 
-const ParticleSystem: React.FC<ParticleSystemProps> = ({
-    style,
-    particleCount = 1000000,
-    autoRotate = false,
-    rotationSpeed = 0.001,
-    onEngineReady
-}) => {
+const ParticleSystem: React.FC<ParticleSystemProps> = ({ style, particleCount = 1000000, autoRotate = false, rotationSpeed = 0.001, onEngineReady }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const engineRef = useRef<ParticleEngine | null>(null);
 
@@ -28,7 +22,7 @@ const ParticleSystem: React.FC<ParticleSystemProps> = ({
             enableControls: true,
             particleCount,
             autoRotate,
-            rotationSpeed
+            rotationSpeed,
         });
 
         // Set up event handlers

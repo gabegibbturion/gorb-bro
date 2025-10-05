@@ -1,5 +1,5 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 export interface ParticleEngineOptions {
     container: HTMLElement;
@@ -37,7 +37,7 @@ export class ParticleEngine {
             particleCount: 1000000,
             autoRotate: false,
             rotationSpeed: 0.001,
-            ...options
+            ...options,
         };
 
         this.clock = new THREE.Clock();
@@ -48,7 +48,7 @@ export class ParticleEngine {
         // Disable Three.js shader errors globally for better performance
         THREE.WebGLRenderer.prototype.debug = {
             checkShaderErrors: false,
-            onShaderError: () => { }
+            onShaderError: () => {},
         };
 
         this.createScene();
@@ -81,7 +81,7 @@ export class ParticleEngine {
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
             alpha: true,
-            powerPreference: "high-performance"
+            powerPreference: "high-performance",
         });
         this.renderer.setSize(this.options.width, this.options.height);
         this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -89,7 +89,7 @@ export class ParticleEngine {
         // Disable shader errors and warnings for better performance
         this.renderer.debug = {
             checkShaderErrors: false,
-            onShaderError: () => { }
+            onShaderError: () => {},
         };
 
         this.container.appendChild(this.renderer.domElement);
@@ -123,11 +123,8 @@ export class ParticleEngine {
             colors.push(color.r, color.g, color.b);
         }
 
-        geometry.setAttribute(
-            'position',
-            new THREE.Float32BufferAttribute(positions, 3)
-        );
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
 
         geometry.computeBoundingSphere();
 
@@ -135,7 +132,7 @@ export class ParticleEngine {
             size: 3,
             vertexColors: true,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.8,
         });
 
         this.points = new THREE.Points(geometry, material);
@@ -160,7 +157,7 @@ export class ParticleEngine {
     }
 
     private setupEventListeners(): void {
-        window.addEventListener('resize', () => this.onWindowResize());
+        window.addEventListener("resize", () => this.onWindowResize());
     }
 
     private onWindowResize(): void {
@@ -266,7 +263,7 @@ export class ParticleEngine {
         this.stop();
 
         // Remove event listeners
-        window.removeEventListener('resize', () => this.onWindowResize());
+        window.removeEventListener("resize", () => this.onWindowResize());
 
         // Dispose controls
         if (this.controls) {
@@ -283,7 +280,7 @@ export class ParticleEngine {
             try {
                 this.container.removeChild(this.renderer.domElement);
             } catch (error) {
-                console.warn('Canvas already removed from DOM');
+                console.warn("Canvas already removed from DOM");
             }
         }
     }

@@ -33,6 +33,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [satelliteCountInput, setSatelliteCountInput] = useState<any>(1000);
     const [selectedEntity, setSelectedEntity] = useState<any>(null);
     const [showSidePanel, setShowSidePanel] = useState(false);
+    const [useInstancedMesh, setUseInstancedMesh] = useState(true);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -279,6 +280,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 <div>
                     Speed: {timeMultiplier}x {isPaused ? "(Paused)" : ""}
                 </div>
+                <div>System: {useInstancedMesh ? "Instanced Mesh" : "Particle System"}</div>
 
                 <div style={{ marginTop: "10px" }}>
                     <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Satellite Controls:</div>
@@ -336,6 +338,18 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     </button>
                     <button onClick={toggleOrbits} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: showOrbits ? "#4CAF50" : "#666" }}>
                         {showOrbits ? "Hide Orbits" : "Show Orbits"}
+                    </button>
+                    <button
+                        onClick={() => {
+                            const newValue = !useInstancedMesh;
+                            setUseInstancedMesh(newValue);
+                            if (engineRef.current) {
+                                engineRef.current.setUseInstancedMesh(newValue);
+                            }
+                        }}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: useInstancedMesh ? "#4CAF50" : "#2196F3" }}
+                    >
+                        {useInstancedMesh ? "Use Particle System" : "Use Instanced Mesh"}
                     </button>
                 </div>
 

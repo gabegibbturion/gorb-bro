@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import Globe from '../components/Globe';
-import Profiler from '../components/Profiler';
+import React, { useState } from "react";
+import Globe from "../components/Globe";
+import Profiler from "../components/Profiler";
 
 const GlobePage: React.FC = () => {
     const [_engine, setEngine] = useState<any>(null);
@@ -18,20 +18,10 @@ const GlobePage: React.FC = () => {
     };
 
     return (
-        <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, position: 'relative' }}>
-            <Globe
-                style={{ width: '100%', height: '100%' }}
-                onEngineReady={handleEngineReady}
-                onSatelliteUpdate={handleSatelliteUpdate}
-                onTimeUpdate={handleTimeUpdate}
-            />
+        <div style={{ width: "100vw", height: "100vh", margin: 0, padding: 0, position: "relative" }}>
+            <Globe style={{ width: "100%", height: "100%" }} onEngineReady={handleEngineReady} onSatelliteUpdate={handleSatelliteUpdate} onTimeUpdate={handleTimeUpdate} />
 
-            <Profiler
-                position="top-right"
-                showFPS={true}
-                showMemory={true}
-                showRenderTime={true}
-            />
+            <Profiler position="top-right" showFPS={true} showMemory={true} showRenderTime={true} />
         </div>
     );
 };

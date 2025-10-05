@@ -1,13 +1,14 @@
-import * as THREE from 'three';
-import type { OrbitalElements } from './OrbitalElements';
-import { OrbitalElementsGenerator } from './OrbitalElements';
-import type { SatelliteEntityOptions } from './SatelliteEntity';
-import { SatelliteEntity } from './SatelliteEntity';
+import * as THREE from "three";
+import type { OrbitalElements } from "./OrbitalElements";
+import { OrbitalElementsGenerator } from "./OrbitalElements";
+import type { SatelliteEntityOptions } from "./SatelliteEntity";
+import { SatelliteEntity } from "./SatelliteEntity";
 
 export interface EntityManagerOptions {
     maxSatellites?: number;
     autoCleanup?: boolean;
     updateInterval?: number;
+    useInstancedMesh?: boolean; // Toggle between particle system and instanced mesh
 }
 
 export class EntityManager {
@@ -17,11 +18,16 @@ export class EntityManager {
     private currentTime: Date = new Date();
     private isUpdating: boolean = false;
 
-    // Unified particle system for all satellites
+    // Instanced buffer geometry for all satellites
+    private instancedMesh: THREE.InstancedMesh | null = null;
+    private satelliteGeometry: THREE.BufferGeometry | null = null;
+    private satelliteMaterial: THREE.PointsMaterial | null = null;
+    private currentSatelliteCount: number = 0;
+
+    // Particle system (legacy)
     private particleSystem: THREE.Points | null = null;
     private particleGeometry: THREE.BufferGeometry | null = null;
     private particleMaterial: THREE.PointsMaterial | null = null;
-    private currentParticleCount: number = 0;
 
     // Event callbacks
     private onSatelliteAdded?: (satellite: SatelliteEntity) => void;
@@ -34,10 +40,10 @@ export class EntityManager {
             maxSatellites: 100000,
             autoCleanup: true,
             updateInterval: 1000, // 1 second
-            ...options
+            useInstancedMesh: true, // Default to instanced mesh
+            ...options,
         };
     }
-
 
     public addSatellite(orbitalElements: OrbitalElements, options?: Partial<SatelliteEntityOptions>): SatelliteEntity | null {
         if (this.satellites.size >= this.options.maxSatellites) {
@@ -48,12 +54,12 @@ export class EntityManager {
         const satrec = OrbitalElementsGenerator.toSatrec(orbitalElements);
 
         // Extract name from orbital elements
-        const name = 'name' in orbitalElements ? orbitalElements.name : `Satellite-${Math.floor(Math.random() * 1000)}`;
+        const name = "name" in orbitalElements ? orbitalElements.name : `Satellite-${Math.floor(Math.random() * 1000)}`;
 
         const satelliteOptions: SatelliteEntityOptions = {
             name,
             satrec,
-            ...options
+            ...options,
         };
 
         const satellite = new SatelliteEntity(satelliteOptions);
@@ -69,8 +75,8 @@ export class EntityManager {
         //     this.scene.add(orbit);
         // }
 
-        // Update particle system
-        this.updateParticleSystem();
+        // Update instanced mesh
+        this.updateInstancedMesh();
 
         // Trigger callback
         if (this.onSatelliteAdded) {
@@ -100,8 +106,8 @@ export class EntityManager {
         satellite.dispose();
         this.satellites.delete(id);
 
-        // Update particle system
-        this.updateParticleSystem();
+        // Update instanced mesh
+        this.updateInstancedMesh();
 
         // Trigger callback
         if (this.onSatelliteRemoved) {
@@ -125,7 +131,7 @@ export class EntityManager {
 
     public clearAll(): void {
         const satelliteIds = Array.from(this.satellites.keys());
-        satelliteIds.forEach(id => this.removeSatellite(id));
+        satelliteIds.forEach((id) => this.removeSatellite(id));
     }
 
     public update(time: Date): void {
@@ -135,12 +141,12 @@ export class EntityManager {
         this.currentTime = time;
 
         // Update all satellites
-        this.satellites.forEach(satellite => {
+        this.satellites.forEach((satellite) => {
             satellite.update(time);
         });
 
-        // Update particle system positions
-        this.updateParticleSystem();
+        // Update instanced mesh positions and colors
+        this.updateInstancedMesh();
 
         // Trigger update callback
         if (this.onUpdate) {
@@ -150,9 +156,46 @@ export class EntityManager {
         this.isUpdating = false;
     }
 
-    private updateParticleSystem(): void {
+    private updateInstancedMesh(): void {
         const satellites = this.getAllSatellites();
 
+        if (this.options.useInstancedMesh) {
+            // Use instanced mesh system
+            this.updateInstancedMeshSystem(satellites);
+        } else {
+            // Use particle system
+            this.updateParticleSystem(satellites);
+        }
+    }
+
+    private updateInstancedMeshSystem(satellites: SatelliteEntity[]): void {
+        // Remove existing instanced mesh if no satellites
+        if (satellites.length === 0) {
+            if (this.instancedMesh) {
+                this.scene.remove(this.instancedMesh);
+                this.satelliteGeometry?.dispose();
+                this.satelliteMaterial?.dispose();
+                this.instancedMesh = null;
+                this.satelliteGeometry = null;
+                this.satelliteMaterial = null;
+                this.currentSatelliteCount = 0;
+            }
+            return;
+        }
+
+        // Only create instanced mesh if it doesn't exist
+        if (!this.instancedMesh) {
+            this.createInstancedMesh();
+        }
+
+        // Update current satellite count
+        this.currentSatelliteCount = satellites.length;
+
+        // Update positions and colors efficiently
+        this.updateInstanceData(satellites);
+    }
+
+    private updateParticleSystem(satellites: SatelliteEntity[]): void {
         // Remove existing particle system if no satellites
         if (satellites.length === 0) {
             if (this.particleSystem) {
@@ -162,7 +205,7 @@ export class EntityManager {
                 this.particleSystem = null;
                 this.particleGeometry = null;
                 this.particleMaterial = null;
-                this.currentParticleCount = 0;
+                this.currentSatelliteCount = 0;
             }
             return;
         }
@@ -172,10 +215,122 @@ export class EntityManager {
             this.createParticleSystem();
         }
 
-        // Update current particle count
-        this.currentParticleCount = satellites.length;
+        // Update current satellite count
+        this.currentSatelliteCount = satellites.length;
 
         // Update positions and colors efficiently
+        this.updateParticlePositions(satellites);
+    }
+
+    private updateInstanceData(satellites: SatelliteEntity[]): void {
+        if (!this.instancedMesh) return;
+
+        const matrix = new THREE.Matrix4();
+        const color = new THREE.Color();
+
+        // Update instance matrices and colors
+        satellites.forEach((satellite, index) => {
+            const position = satellite.getPositionDirect();
+            const satelliteColor = satellite.getColor();
+
+            // Set position for this instance (no scaling needed for points)
+            matrix.setPosition(position);
+
+            // Set the instance matrix
+            this.instancedMesh.setMatrixAt(index, matrix);
+
+            // Set the instance color
+            color.setHex(satelliteColor);
+            this.instancedMesh.setColorAt(index, color);
+        });
+
+        // Hide unused instances by moving them far away
+        for (let i = satellites.length; i < this.options.maxSatellites; i++) {
+            matrix.identity();
+            matrix.setPosition(new THREE.Vector3(10000, 10000, 10000));
+            this.instancedMesh.setMatrixAt(i, matrix);
+        }
+
+        // Mark instance attributes as needing update
+        this.instancedMesh.instanceMatrix.needsUpdate = true;
+        if (this.instancedMesh.instanceColor) {
+            this.instancedMesh.instanceColor.needsUpdate = true;
+        }
+    }
+
+    private createInstancedMesh(): void {
+        const satellites = this.getAllSatellites();
+        if (satellites.length === 0) return;
+
+        // Remove existing instanced mesh
+        if (this.instancedMesh) {
+            this.scene.remove(this.instancedMesh);
+            this.satelliteGeometry?.dispose();
+            this.satelliteMaterial?.dispose();
+        }
+
+        // Create a simple point geometry for each satellite
+        this.satelliteGeometry = new THREE.BufferGeometry();
+
+        // Create a single point vertex
+        const positions = new Float32Array([0, 0, 0]);
+        this.satelliteGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+        // Create point material with per-instance colors
+        this.satelliteMaterial = new THREE.PointsMaterial({
+            size: 0.01,
+            vertexColors: false, // We'll use instance colors instead
+        });
+
+        // Create instanced mesh with maximum possible instances
+        this.instancedMesh = new THREE.InstancedMesh(this.satelliteGeometry, this.satelliteMaterial, this.options.maxSatellites);
+
+        // Enable instance colors
+        this.instancedMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.options.maxSatellites * 3), 3);
+
+        this.scene.add(this.instancedMesh);
+
+        // Update instance data for current satellites
+        this.updateInstanceData(satellites);
+    }
+
+    private createParticleSystem(): void {
+        const satellites = this.getAllSatellites();
+        if (satellites.length === 0) return;
+
+        // Remove existing particle system
+        if (this.particleSystem) {
+            this.scene.remove(this.particleSystem);
+            this.particleGeometry?.dispose();
+            this.particleMaterial?.dispose();
+        }
+
+        // Create geometry with a larger buffer to accommodate dynamic satellite counts
+        // Use maxSatellites as the buffer size to avoid frequent recreations
+        const maxParticles = this.options.maxSatellites;
+        this.particleGeometry = new THREE.BufferGeometry();
+
+        // Initialize with maximum possible particles (all zeros initially)
+        const positions = new Float32Array(maxParticles * 3);
+        const colors = new Float32Array(maxParticles * 3);
+
+        this.particleGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        this.particleGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+        this.particleGeometry.computeBoundingSphere();
+
+        // Create material exactly like ParticleEngine
+        this.particleMaterial = new THREE.PointsMaterial({
+            size: 0.01,
+            vertexColors: true,
+            // transparent: true,
+            // opacity: 0.8
+        });
+
+        // Create particle system
+        this.particleSystem = new THREE.Points(this.particleGeometry, this.particleMaterial);
+        this.scene.add(this.particleSystem);
+
+        // Update positions for current satellites
         this.updateParticlePositions(satellites);
     }
 
@@ -224,47 +379,6 @@ export class EntityManager {
         colorAttribute.needsUpdate = true;
     }
 
-    private createParticleSystem(): void {
-        const satellites = this.getAllSatellites();
-        if (satellites.length === 0) return;
-
-        // Remove existing particle system
-        if (this.particleSystem) {
-            this.scene.remove(this.particleSystem);
-            this.particleGeometry?.dispose();
-            this.particleMaterial?.dispose();
-        }
-
-        // Create geometry with a larger buffer to accommodate dynamic satellite counts
-        // Use maxSatellites as the buffer size to avoid frequent recreations
-        const maxParticles = this.options.maxSatellites;
-        this.particleGeometry = new THREE.BufferGeometry();
-
-        // Initialize with maximum possible particles (all zeros initially)
-        const positions = new Float32Array(maxParticles * 3);
-        const colors = new Float32Array(maxParticles * 3);
-
-        this.particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        this.particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        this.particleGeometry.computeBoundingSphere();
-
-        // Create material exactly like ParticleEngine
-        this.particleMaterial = new THREE.PointsMaterial({
-            size: 0.01,
-            vertexColors: true,
-            // transparent: true,
-            // opacity: 0.8
-        });
-
-        // Create particle system
-        this.particleSystem = new THREE.Points(this.particleGeometry, this.particleMaterial);
-        this.scene.add(this.particleSystem);
-
-        // Update positions for current satellites
-        this.updateParticlePositions(satellites);
-    }
-
-
     public setTime(time: Date): void {
         this.currentTime = time;
         this.update(time);
@@ -273,7 +387,6 @@ export class EntityManager {
     public getCurrentTime(): Date {
         return new Date(this.currentTime);
     }
-
 
     // Event handlers
     public onSatelliteAddedCallback(callback: (satellite: SatelliteEntity) => void): void {
@@ -290,15 +403,13 @@ export class EntityManager {
 
     // Utility methods
     public getSatellitesInRange(position: THREE.Vector3, radius: number): SatelliteEntity[] {
-        return this.getAllSatellites().filter(satellite => {
+        return this.getAllSatellites().filter((satellite) => {
             return satellite.getPosition().distanceTo(position) <= radius;
         });
     }
 
     public getSatellitesByName(name: string): SatelliteEntity[] {
-        return this.getAllSatellites().filter(satellite =>
-            satellite.name.toLowerCase().includes(name.toLowerCase())
-        );
+        return this.getAllSatellites().filter((satellite) => satellite.name.toLowerCase().includes(name.toLowerCase()));
     }
 
     public getRandomSatellites(count: number): SatelliteEntity[] {
@@ -322,7 +433,7 @@ export class EntityManager {
             trailLength: 50 + Math.random() * 100,
             trailColor: color,
             showOrbit: false,
-            orbitColor: color
+            orbitColor: color,
         });
     }
 
@@ -342,7 +453,7 @@ export class EntityManager {
             trailLength: 50 + Math.random() * 100,
             trailColor: color,
             showOrbit: false,
-            orbitColor: color
+            orbitColor: color,
         });
     }
 
@@ -351,9 +462,9 @@ export class EntityManager {
         const validSatrec = OrbitalElementsGenerator.createValidSatellite();
 
         const satelliteOptions: SatelliteEntityOptions = {
-            name: 'DROID-001',
+            name: "DROID-001",
             satrec: validSatrec,
-            ...options
+            ...options,
         };
 
         const satellite = new SatelliteEntity(satelliteOptions);
@@ -369,8 +480,8 @@ export class EntityManager {
             this.scene.add(orbit);
         }
 
-        // Update particle system
-        this.updateParticleSystem();
+        // Update instanced mesh
+        this.updateInstancedMesh();
 
         // Trigger callback
         if (this.onSatelliteAdded) {
@@ -380,25 +491,81 @@ export class EntityManager {
         return satellite;
     }
 
+    public getInstancedMesh(): THREE.InstancedMesh | null {
+        return this.instancedMesh;
+    }
+
     public getParticleSystem(): THREE.Points | null {
         return this.particleSystem;
     }
 
-    public getParticleSystemInfo(): {
-        particleCount: number;
-        maxParticles: number;
-        isOptimized: boolean
+    public getCurrentSystem(): THREE.Object3D | null {
+        if (this.options.useInstancedMesh) {
+            return this.instancedMesh;
+        } else {
+            return this.particleSystem;
+        }
+    }
+
+    public getSystemInfo(): {
+        satelliteCount: number;
+        maxSatellites: number;
+        isOptimized: boolean;
+        systemType: "instanced" | "particle";
     } {
         return {
-            particleCount: this.currentParticleCount,
-            maxParticles: this.options.maxSatellites,
-            isOptimized: this.particleSystem !== null
+            satelliteCount: this.currentSatelliteCount,
+            maxSatellites: this.options.maxSatellites,
+            isOptimized: this.options.useInstancedMesh ? this.instancedMesh !== null : this.particleSystem !== null,
+            systemType: this.options.useInstancedMesh ? "instanced" : "particle",
         };
+    }
+
+    public setUseInstancedMesh(useInstanced: boolean): void {
+        if (this.options.useInstancedMesh !== useInstanced) {
+            this.options.useInstancedMesh = useInstanced;
+
+            // Clean up current system
+            if (useInstanced) {
+                // Switching to instanced mesh, clean up particle system
+                if (this.particleSystem) {
+                    this.scene.remove(this.particleSystem);
+                    this.particleGeometry?.dispose();
+                    this.particleMaterial?.dispose();
+                    this.particleSystem = null;
+                    this.particleGeometry = null;
+                    this.particleMaterial = null;
+                }
+            } else {
+                // Switching to particle system, clean up instanced mesh
+                if (this.instancedMesh) {
+                    this.scene.remove(this.instancedMesh);
+                    this.satelliteGeometry?.dispose();
+                    this.satelliteMaterial?.dispose();
+                    this.instancedMesh = null;
+                    this.satelliteGeometry = null;
+                    this.satelliteMaterial = null;
+                }
+            }
+
+            // Recreate the system
+            this.updateInstancedMesh();
+        }
     }
 
     public dispose(): void {
         this.clearAll();
         this.satellites.clear();
+
+        // Clean up instanced mesh
+        if (this.instancedMesh) {
+            this.scene.remove(this.instancedMesh);
+            this.satelliteGeometry?.dispose();
+            this.satelliteMaterial?.dispose();
+            this.instancedMesh = null;
+            this.satelliteGeometry = null;
+            this.satelliteMaterial = null;
+        }
 
         // Clean up particle system
         if (this.particleSystem) {

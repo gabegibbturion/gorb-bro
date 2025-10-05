@@ -1,4 +1,4 @@
-import * as satellite from 'satellite.js';
+import * as satellite from "satellite.js";
 
 // Earth's gravitational parameter (km^3/s^2)
 const MU_EARTH = 398600.4418;
@@ -6,13 +6,13 @@ const EARTH_RADIUS = 6371.0; // km
 
 // Classical Orbital Elements interface
 export interface ClassicalOrbitalElements {
-    semiMajorAxis: number;        // a (km)
-    eccentricity: number;         // e (0-1)
-    inclination: number;          // i (degrees)
+    semiMajorAxis: number; // a (km)
+    eccentricity: number; // e (0-1)
+    inclination: number; // i (degrees)
     rightAscensionOfAscendingNode: number; // Ω (degrees)
-    argumentOfPeriapsis: number;  // ω (degrees)
-    meanAnomaly: number;          // M (degrees)
-    epoch: Date;                  // Reference time
+    argumentOfPeriapsis: number; // ω (degrees)
+    meanAnomaly: number; // M (degrees)
+    epoch: Date; // Reference time
 }
 
 // TLE interface (existing)
@@ -57,9 +57,9 @@ function calculateChecksum(line: string): number {
     let checksum = 0;
     for (let i = 0; i < line.length; i++) {
         const char = line[i];
-        if (char >= '0' && char <= '9') {
+        if (char >= "0" && char <= "9") {
             checksum += parseInt(char);
-        } else if (char === '-') {
+        } else if (char === "-") {
             checksum += 1;
         }
     }
@@ -69,7 +69,7 @@ function calculateChecksum(line: string): number {
 /**
  * Format a number for TLE with specific width and decimal places
  */
-function formatTLENumber(value: number, width: number, decimals: number, padChar: string = ' '): string {
+function formatTLENumber(value: number, width: number, decimals: number, padChar: string = " "): string {
     const formatted = value.toFixed(decimals);
     return formatted.padStart(width, padChar);
 }
@@ -79,22 +79,24 @@ function formatTLENumber(value: number, width: number, decimals: number, padChar
  */
 function formatEccentricity(eccentricity: number): string {
     const eccStr = (eccentricity * 10000000).toFixed(0);
-    return eccStr.padStart(7, '0');
+    return eccStr.padStart(7, "0");
 }
 
 /**
  * Format a number in TLE exponential notation (e.g., 0.00012 -> " 12000-4")
  */
 function formatTLEExponential(value: number): string {
-    if (value === 0) return ' 00000-0';
+    if (value === 0) return " 00000-0";
 
-    const sign = value < 0 ? '-' : ' ';
+    const sign = value < 0 ? "-" : " ";
     const absValue = Math.abs(value);
     const exponent = Math.floor(Math.log10(absValue));
     const mantissa = absValue / Math.pow(10, exponent);
-    const mantissaStr = Math.round(mantissa * 100000).toString().padStart(5, '0');
+    const mantissaStr = Math.round(mantissa * 100000)
+        .toString()
+        .padStart(5, "0");
     const exponentStr = Math.abs(exponent).toString();
-    const expSign = exponent < 0 ? '-' : '+';
+    const expSign = exponent < 0 ? "-" : "+";
 
     return `${sign}${mantissaStr}${expSign}${exponentStr}`;
 }
@@ -112,13 +114,12 @@ export class OrbitalElementsGenerator {
             rightAscensionOfAscendingNode: Math.random() * 360, // RAAN: 0 to 360 degrees
             argumentOfPeriapsis: Math.random() * 360, // 0 to 360 degrees
             meanAnomaly: Math.random() * 360, // 0 to 360 degrees
-            epoch: new Date()
+            epoch: new Date(),
         };
     }
 
-
     // Convert COE to satellite.js satrec object
-    public static coeToSatrec(coe: ClassicalOrbitalElements, name: string = 'Satellite'): any {
+    public static coeToSatrec(coe: ClassicalOrbitalElements, name: string = "Satellite"): any {
         // Use the improved TLE generation
         const tle = this.coeToTLE(coe, name);
 
@@ -131,7 +132,6 @@ export class OrbitalElementsGenerator {
         return satrec;
     }
 
-
     // Convert OMM to satellite.js satrec object
     public static ommToSatrec(omm: OMMData): any {
         const coe: ClassicalOrbitalElements = {
@@ -141,7 +141,7 @@ export class OrbitalElementsGenerator {
             rightAscensionOfAscendingNode: omm.rightAscensionOfAscendingNode,
             argumentOfPeriapsis: omm.argumentOfPeriapsis,
             meanAnomaly: omm.meanAnomaly,
-            epoch: omm.epoch
+            epoch: omm.epoch,
         };
 
         return this.coeToSatrec(coe);
@@ -156,7 +156,7 @@ export class OrbitalElementsGenerator {
     public static testValidTLE(): any {
         const validTLE = {
             line1: "1 56965U 23084AK  25275.39431877  .00096953  00000-0  13182-2 0  9990",
-            line2: "2 56965  97.5820  54.8217 0005209 110.5093 249.6721 15.57245498128750"
+            line2: "2 56965  97.5820  54.8217 0005209 110.5093 249.6721 15.57245498128750",
         };
 
         const satrec = satellite.twoline2satrec(validTLE.line1, validTLE.line2);
@@ -172,14 +172,14 @@ export class OrbitalElementsGenerator {
     }
 
     // Convert COE to TLE format
-    public static coeToTLE(coe: ClassicalOrbitalElements, name: string = 'Satellite', options: any = {}): TLEData {
+    public static coeToTLE(coe: ClassicalOrbitalElements, name: string = "Satellite", options: any = {}): TLEData {
         const {
             noradId = Math.floor(Math.random() * 90000) + 10000,
-            classification = 'U',
-            intlDesignator = '24001A',
+            classification = "U",
+            intlDesignator = "24001A",
             bstar = 0.00012,
             elementSetNumber = 999,
-            revNumber = 0
+            revNumber = 0,
         } = options;
 
         // Get current epoch
@@ -192,29 +192,29 @@ export class OrbitalElementsGenerator {
         const epochDay = dayOfYear + timeOfDay;
 
         // Calculate mean motion (revolutions per day)
-        const n = Math.sqrt(MU_EARTH / Math.pow(coe.semiMajorAxis, 3)) * 86400 / (2 * Math.PI);
+        const n = (Math.sqrt(MU_EARTH / Math.pow(coe.semiMajorAxis, 3)) * 86400) / (2 * Math.PI);
 
         // Format epoch (YYddd.dddddddd)
         const epochDayStr = epochDay.toFixed(8);
-        const epochStr = `${String(epochYear).padStart(2, '0')}${epochDayStr.padStart(12, '0')}`;
+        const epochStr = `${String(epochYear).padStart(2, "0")}${epochDayStr.padStart(12, "0")}`;
 
         // Mean motion derivatives (typically very small for most satellites)
         const nDot = 0.00000001;
         const nDotDot = 0;
 
         // Format mean motion first derivative
-        let nDotStr = nDot >= 0 ? ' ' : '-';
-        nDotStr += '.';
-        nDotStr += Math.abs(nDot).toFixed(8).split('.')[1];
+        let nDotStr = nDot >= 0 ? " " : "-";
+        nDotStr += ".";
+        nDotStr += Math.abs(nDot).toFixed(8).split(".")[1];
 
         // Format B* drag term
         const bstarStr = formatTLEExponential(bstar);
 
         // Build Line 1 (without checksum)
         // Column positions are critical in TLE format!
-        const noradIdStr = String(noradId).padStart(5, '0');
-        const intlDesStr = intlDesignator.padEnd(8, ' ');
-        const elemSetStr = String(elementSetNumber).padStart(4, ' ');
+        const noradIdStr = String(noradId).padStart(5, "0");
+        const intlDesStr = intlDesignator.padEnd(8, " ");
+        const elemSetStr = String(elementSetNumber).padStart(4, " ");
 
         let line1 = `1 ${noradIdStr}${classification} ${intlDesStr} ${epochStr}${nDotStr} ${formatTLEExponential(nDotDot)}${bstarStr} 0 ${elemSetStr}`;
 
@@ -222,7 +222,7 @@ export class OrbitalElementsGenerator {
         line1 += checksum1;
 
         // Build Line 2 (without checksum)
-        let line2 = `2 ${String(noradId).padStart(5, '0')} `;
+        let line2 = `2 ${String(noradId).padStart(5, "0")} `;
         line2 += `${formatTLENumber(coe.inclination, 8, 4)} `;
         line2 += `${formatTLENumber(coe.rightAscensionOfAscendingNode, 8, 4)} `;
         line2 += `${formatEccentricity(coe.eccentricity)} `;
@@ -235,9 +235,9 @@ export class OrbitalElementsGenerator {
         line2 += checksum2;
 
         return {
-            name: name || 'Satellite',
+            name: name || "Satellite",
             line1: line1,
-            line2: line2
+            line2: line2,
         };
     }
 
@@ -246,15 +246,14 @@ export class OrbitalElementsGenerator {
         const coe = this.generateRandomCOE(name, altitudeRange);
         const tle = this.coeToTLE(coe, name, options);
 
-
         return tle;
     }
 
     // Convert any orbital elements to satrec
     public static toSatrec(orbitalElements: OrbitalElements): any {
-        if ('line1' in orbitalElements) {
+        if ("line1" in orbitalElements) {
             return this.tleToSatrec(orbitalElements as TLEData);
-        } else if ('semiMajorAxis' in orbitalElements) {
+        } else if ("semiMajorAxis" in orbitalElements) {
             return this.coeToSatrec(orbitalElements as ClassicalOrbitalElements);
         } else {
             return this.ommToSatrec(orbitalElements as OMMData);
