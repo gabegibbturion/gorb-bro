@@ -228,7 +228,7 @@ export class SatelliteEntity {
         this.isVisible = visible;
     }
 
-    public isVisible(): boolean {
+    public getVisible(): boolean {
         return this.isVisible;
     }
 
