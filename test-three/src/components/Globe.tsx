@@ -40,6 +40,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [globeVisible, setGlobeVisible] = useState(true);
     const [cloudsVisible, setCloudsVisible] = useState(true);
     const [atmosphereVisible, setAtmosphereVisible] = useState(true);
+    const [meshUpdatesEnabled, setMeshUpdatesEnabled] = useState(true);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -128,43 +129,20 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         });
     };
 
-    const addRandomSatellite = () => {
-        if (!engineRef.current) return;
-
-        const colors = [0xffff00, 0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0x00ffff];
-        const color = colors[Math.floor(Math.random() * colors.length)];
-
-        const satellite = engineRef.current.addRandomSatellite();
-        if (satellite) {
-            // Update satellite color (particle system will handle the visual update)
-            satellite.setColor(color);
-        }
-    };
-
     const addMultipleSatellites = () => {
         if (!engineRef.current) return;
 
         const colors = [0xffff00, 0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xff8800, 0x8800ff, 0x00ff88, 0xff0088];
 
-        for (let i = 0; i < satelliteCountInput; i++) {
-            const color = colors[i % colors.length];
-            const satellite = engineRef.current.addRandomTLEFromCOE();
-            if (satellite) {
-                // Update satellite color (particle system will handle the visual update)
-                satellite.setColor(color);
-            }
-        }
+        // Use batch loading for much better performance
+        engineRef.current.addRandomTLEFromCOEBatch(
+            satelliteCountInput,
+            'Random-Sat',
+            [400, 800],
+            colors
+        );
     };
 
-    const removeRandomSatellite = () => {
-        if (!engineRef.current) return;
-
-        const satellites = engineRef.current.getAllSatellites();
-        if (satellites.length > 0) {
-            const randomSatellite = satellites[Math.floor(Math.random() * satellites.length)];
-            engineRef.current.removeSatellite(randomSatellite.id);
-        }
-    };
 
     const clearAllSatellites = () => {
         if (!engineRef.current) return;
@@ -191,39 +169,6 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         }
     };
 
-
-    const populateGlobe = () => {
-        if (!engineRef.current) return;
-
-        // Clear existing satellites
-        clearAllSatellites();
-
-        // Create multiple satellites with different orbital parameters
-        const satelliteConfigs = [
-            { name: "ISS", altitude: [400, 450], color: 0x00ff00 },
-            { name: "HST", altitude: [540, 560], color: 0xff0000 },
-            { name: "GPS", altitude: [20000, 20100], color: 0x0000ff },
-            { name: "NOAA", altitude: [800, 850], color: 0xffff00 },
-            { name: "LANDSAT", altitude: [700, 750], color: 0xff00ff },
-            { name: "SENTINEL", altitude: [780, 800], color: 0x00ffff },
-            { name: "TERRA", altitude: [700, 720], color: 0xff8800 },
-            { name: "AQUA", altitude: [700, 720], color: 0x8800ff },
-        ];
-
-        satelliteConfigs.forEach((config) => {
-            const coe = OrbitalElementsGenerator.generateRandomCOE(config.name, config.altitude as [number, number]);
-            const satellite = engineRef.current!.addSatellite(coe, {
-                color: config.color,
-                size: 0.01 + Math.random() * 0.005,
-                showTrail: false, // Temporarily disabled
-                trailLength: 100 + Math.random() * 50,
-                trailColor: config.color,
-            });
-
-            if (satellite) {
-            }
-        });
-    };
 
     const toggleOrbits = () => {
         if (!engineRef.current) return;
@@ -326,6 +271,18 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             setAtmosphereVisible(newValue);
             enhancedGlobe.setAtmosphereVisible(newValue);
         }
+    };
+
+    const toggleMeshUpdates = () => {
+        if (!engineRef.current) return;
+        const newValue = !meshUpdatesEnabled;
+        setMeshUpdatesEnabled(newValue);
+        engineRef.current.setMeshUpdatesEnabled(newValue);
+    };
+
+    const forceUpdateMesh = () => {
+        if (!engineRef.current) return;
+        engineRef.current.forceUpdateMesh();
     };
 
     return (
@@ -474,6 +431,45 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     >
                         {atmosphereVisible ? "Hide Atmosphere" : "Show Atmosphere"}
                     </button>
+                </div>
+
+                <div style={{ marginTop: "10px" }}>
+                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Mesh Update Controls:</div>
+                    <div>Mesh Updates: {meshUpdatesEnabled ? "Enabled" : "Disabled"}</div>
+                    <button
+                        onClick={toggleMeshUpdates}
+                        style={{
+                            margin: "2px",
+                            padding: "5px",
+                            fontSize: "10px",
+                            backgroundColor: meshUpdatesEnabled ? "#4CAF50" : "#F44336",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "3px",
+                            cursor: "pointer"
+                        }}
+                    >
+                        {meshUpdatesEnabled ? "Disable Mesh Updates" : "Enable Mesh Updates"}
+                    </button>
+                    <button
+                        onClick={forceUpdateMesh}
+                        disabled={meshUpdatesEnabled}
+                        style={{
+                            margin: "2px",
+                            padding: "5px",
+                            fontSize: "10px",
+                            backgroundColor: meshUpdatesEnabled ? "#666" : "#FF9800",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "3px",
+                            cursor: meshUpdatesEnabled ? "not-allowed" : "pointer"
+                        }}
+                    >
+                        Update Mesh Now
+                    </button>
+                    <div style={{ fontSize: "9px", color: "#888", marginTop: "5px" }}>
+                        Tip: Disable mesh updates before adding many satellites, then click "Update Mesh Now"
+                    </div>
                 </div>
 
                 <div style={{ marginTop: "10px" }}>

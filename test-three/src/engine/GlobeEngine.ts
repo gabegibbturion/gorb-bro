@@ -62,7 +62,7 @@ export class GlobeEngine {
       rotationSpeed: 0.001,
       maxSatellites: 50,
       useInstancedMesh: false,
-      useEnhancedGlobe: true, // Default to enhanced globe
+      useEnhancedGlobe: false, // Default to enhanced globe
       ...options,
     };
 
@@ -444,6 +444,15 @@ export class GlobeEngine {
     return this.entityManager.addRandomTLEFromCOE(name, altitudeRange);
   }
 
+  public addRandomTLEFromCOEBatch(
+    count: number,
+    namePrefix?: string,
+    altitudeRange?: [number, number],
+    colors?: number[]
+  ): SatelliteEntity[] {
+    return this.entityManager.addRandomTLEFromCOEBatch(count, namePrefix, altitudeRange, colors);
+  }
+
   public removeSatellite(id: string): boolean {
     return this.entityManager.removeSatellite(id);
   }
@@ -552,31 +561,24 @@ export class GlobeEngine {
 
   public loadTLEFromFile(content: string, maxCount: number = 0): SatelliteEntity[] {
     const parsedTLEs = TLEParser.parseTLEFile(content, maxCount);
-    const satellites: SatelliteEntity[] = [];
 
     console.log(`Parsed ${parsedTLEs.length} TLEs from file`);
 
-    parsedTLEs.forEach((parsedTLE, index) => {
-      try {
-        const tleData = TLEParser.toTLEData(parsedTLE);
-        const satellite = this.entityManager.addSatellite(tleData, {
-          name: parsedTLE.name,
-          color: this.getRandomColor(),
-          size: 0.005 + Math.random() * 0.005,
-          showTrail: false,
-          trailLength: 50,
-          trailColor: this.getRandomColor(),
-        });
-
-        if (satellite) {
-          satellites.push(satellite);
-        }
-      } catch (error) {
-        console.warn(`Failed to create satellite from TLE ${index}:`, error);
+    // Prepare batch data
+    const satellitesData = parsedTLEs.map(parsedTLE => ({
+      orbitalElements: TLEParser.toTLEData(parsedTLE),
+      options: {
+        name: parsedTLE.name,
+        color: this.getRandomColor(),
+        size: 0.005 + Math.random() * 0.005,
+        showTrail: false,
+        trailLength: 50,
+        trailColor: this.getRandomColor(),
       }
-    });
+    }));
 
-    return satellites;
+    // Use batch add for much better performance
+    return this.entityManager.addSatellitesBatch(satellitesData);
   }
 
   public loadTLEFromURL(url: string, maxCount: number = 0): Promise<SatelliteEntity[]> {
@@ -630,8 +632,16 @@ export class GlobeEngine {
     return this.entityManager.getUseWebGPURendering();
   }
 
-  public getEntityManager(): EntityManager {
-    return this.entityManager;
+  public setMeshUpdatesEnabled(enabled: boolean): void {
+    this.entityManager.setMeshUpdatesEnabled(enabled);
+  }
+
+  public getMeshUpdatesEnabled(): boolean {
+    return this.entityManager.getMeshUpdatesEnabled();
+  }
+
+  public forceUpdateMesh(): void {
+    this.entityManager.forceUpdateMesh();
   }
 
   // Alias methods for backward compatibility

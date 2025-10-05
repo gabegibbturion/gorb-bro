@@ -30,8 +30,8 @@ export class SatelliteEntity {
     private trail!: THREE.Line;
     private trailGeometry!: THREE.BufferGeometry;
     private trailMaterial!: THREE.LineBasicMaterial;
-    private orbitVisualization!: OrbitVisualization;
-    private currentCOE!: ClassicalOrbitalElements;
+    private orbitVisualization: OrbitVisualization | null = null;
+    private currentCOE: ClassicalOrbitalElements | null = null;
 
     private options: Required<SatelliteEntityOptions>;
     private currentPosition: THREE.Vector3 = new THREE.Vector3();
@@ -57,9 +57,13 @@ export class SatelliteEntity {
             ...options
         };
 
-        this.createTrail();
-        this.createOrbitVisualization();
-        // this.update(new Date());
+        // Only create trail if needed (performance optimization)
+        if (this.options.showTrail) {
+            this.createTrail();
+        }
+
+        // Lazy-load orbit visualization only when requested (huge performance boost)
+        // this.createOrbitVisualization();
     }
 
 
@@ -81,8 +85,12 @@ export class SatelliteEntity {
     }
 
     private createOrbitVisualization(): void {
+        if (this.orbitVisualization) return; // Already created
+
         // Extract COE from satrec for orbit visualization
-        this.currentCOE = this.extractCOEFromSatrec();
+        if (!this.currentCOE) {
+            this.currentCOE = this.extractCOEFromSatrec();
+        }
 
         this.orbitVisualization = new OrbitVisualization(this.currentCOE, {
             color: this.options.orbitColor,
@@ -93,6 +101,12 @@ export class SatelliteEntity {
         });
 
         this.orbitVisualization.setVisible(this.options.showOrbit);
+    }
+
+    private ensureOrbitVisualization(): void {
+        if (!this.orbitVisualization) {
+            this.createOrbitVisualization();
+        }
     }
 
     private extractCOEFromSatrec(): ClassicalOrbitalElements {
@@ -112,7 +126,8 @@ export class SatelliteEntity {
 
     public update(time: Date): void {
         // Skip update if time hasn't changed significantly (performance optimization)
-        if (this.lastUpdateTime && Math.abs(time.getTime() - this.lastUpdateTime.getTime()) < 100) {
+        // Reduced threshold from 100ms to 50ms for smoother updates
+        if (this.lastUpdateTime && Math.abs(time.getTime() - this.lastUpdateTime.getTime()) < 50) {
             return;
         }
 
@@ -161,16 +176,19 @@ export class SatelliteEntity {
     }
 
     public getOrbitVisualization(): THREE.Line | null {
+        this.ensureOrbitVisualization();
         return this.orbitVisualization ? this.orbitVisualization.getLine() : null;
     }
 
     public toggleOrbitVisibility(): void {
+        this.ensureOrbitVisualization();
         if (this.orbitVisualization) {
             this.orbitVisualization.toggleVisibility();
         }
     }
 
     public setOrbitVisible(visible: boolean): void {
+        this.ensureOrbitVisualization();
         if (this.orbitVisualization) {
             this.orbitVisualization.setVisible(visible);
         }

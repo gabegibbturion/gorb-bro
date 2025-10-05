@@ -126,8 +126,8 @@ export class OrbitalElementsGenerator {
         // Use satellite.js to parse the TLE
         const satrec = satellite.twoline2satrec(tle.line1, tle.line2);
 
-        // Test propagation immediately
-        satellite.propagate(satrec, new Date());
+        // No need to test propagation here - it will be done during first update
+        // Removing this call speeds up batch loading significantly
 
         return satrec;
     }

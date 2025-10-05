@@ -283,7 +283,7 @@ export class EnhancedGlobe {
             side: THREE.DoubleSide,
         });
         this.clouds = new THREE.Mesh(cloudGeo, cloudsMat);
-        this.group.add(this.clouds);
+        // this.group.add(this.clouds);
     }
 
     private createAtmosphere(): void {
@@ -327,7 +327,7 @@ export class EnhancedGlobe {
             side: THREE.BackSide,
         });
         this.atmosphere = new THREE.Mesh(atmosGeo, atmosMat);
-        this.group.add(this.atmosphere);
+        // this.group.add(this.atmosphere);
     }
 
     /**

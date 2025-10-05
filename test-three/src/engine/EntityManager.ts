@@ -21,6 +21,7 @@ export class EntityManager {
     private options: Required<EntityManagerOptions>;
     private currentTime: Date = new Date();
     private isUpdating: boolean = false;
+    private meshUpdatesEnabled: boolean = true; // Control mesh updates
 
     // Instanced buffer geometry for all satellites
     private instancedMesh: THREE.InstancedMesh | null = null;
@@ -97,6 +98,61 @@ export class EntityManager {
         return satellite;
     }
 
+    /**
+     * Add multiple satellites in batch without updating mesh each time
+     * Much faster for loading large numbers of satellites
+     */
+    public addSatellitesBatch(satellitesData: Array<{
+        orbitalElements: OrbitalElements;
+        options?: Partial<SatelliteEntityOptions>;
+    }>): SatelliteEntity[] {
+        const addedSatellites: SatelliteEntity[] = [];
+
+        console.log(`Starting batch add of ${satellitesData.length} satellites...`);
+        const startTime = performance.now();
+
+        // Add all satellites without updating mesh
+        for (const data of satellitesData) {
+            if (this.satellites.size >= this.options.maxSatellites) {
+                console.warn(`Reached max satellites limit: ${this.options.maxSatellites}`);
+                break;
+            }
+
+            try {
+                // Convert orbital elements to satrec
+                const satrec = OrbitalElementsGenerator.toSatrec(data.orbitalElements);
+
+                // Extract name from orbital elements
+                const name = "name" in data.orbitalElements ? data.orbitalElements.name : `Satellite-${Math.floor(Math.random() * 1000)}`;
+
+                const satelliteOptions: SatelliteEntityOptions = {
+                    name,
+                    satrec,
+                    ...data.options,
+                };
+
+                const satellite = new SatelliteEntity(satelliteOptions);
+                this.satellites.set(satellite.id, satellite);
+                addedSatellites.push(satellite);
+
+                // Trigger callback
+                if (this.onSatelliteAdded) {
+                    this.onSatelliteAdded(satellite);
+                }
+            } catch (error) {
+                console.warn(`Failed to add satellite:`, error);
+            }
+        }
+
+        // Update mesh once for all satellites
+        this.updateInstancedMesh();
+
+        const endTime = performance.now();
+        console.log(`Batch add complete: ${addedSatellites.length} satellites added in ${(endTime - startTime).toFixed(2)}ms`);
+
+        return addedSatellites;
+    }
+
     public removeSatellite(id: string): boolean {
         const satellite = this.satellites.get(id);
         if (!satellite) {
@@ -168,6 +224,11 @@ export class EntityManager {
     }
 
     private updateInstancedMesh(): void {
+        // Skip mesh updates if disabled
+        if (!this.meshUpdatesEnabled) {
+            return;
+        }
+
         const satellites = this.getAllSatellites();
 
         if (this.options.useWebGPURendering && this.webgpuRenderer) {
@@ -562,6 +623,54 @@ export class EntityManager {
         });
     }
 
+    /**
+     * Add multiple random satellites in batch (much faster)
+     */
+    public addRandomTLEFromCOEBatch(
+        count: number,
+        namePrefix?: string,
+        altitudeRange: [number, number] = [400, 800],
+        colors?: number[]
+    ): SatelliteEntity[] {
+        console.log(`Generating ${count} random satellites...`);
+        const startTime = performance.now();
+
+        const defaultColors = [0xffff00, 0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xff8800, 0x8800ff, 0x00ff88, 0xff0088];
+        const colorPalette = colors || defaultColors;
+
+        // Prepare all satellite data first
+        const satellitesData = [];
+        for (let i = 0; i < count; i++) {
+            const satelliteName = namePrefix ? `${namePrefix}-${i}` : `Random-TLE-${Math.floor(Math.random() * 100000)}`;
+            const tle = OrbitalElementsGenerator.generateRandomTLEFromCOE(satelliteName, altitudeRange);
+            const color = colorPalette[i % colorPalette.length];
+
+            satellitesData.push({
+                orbitalElements: tle,
+                options: {
+                    color,
+                    size: 0.01 + Math.random() * 0.005,
+                    showTrail: false, // Disable trails for performance with large batches
+                    trailLength: 50 + Math.random() * 100,
+                    trailColor: color,
+                    showOrbit: false,
+                    orbitColor: color,
+                }
+            });
+        }
+
+        const genTime = performance.now();
+        console.log(`Generated ${count} TLEs in ${(genTime - startTime).toFixed(2)}ms`);
+
+        // Batch add all satellites
+        const result = this.addSatellitesBatch(satellitesData);
+
+        const totalTime = performance.now();
+        console.log(`Total time: ${(totalTime - startTime).toFixed(2)}ms (${((totalTime - startTime) / count).toFixed(2)}ms per satellite)`);
+
+        return result;
+    }
+
     // Add a satellite using the exact valid TLE (for testing)
     public addValidSatellite(options?: Partial<SatelliteEntityOptions>): SatelliteEntity | null {
         const validSatrec = OrbitalElementsGenerator.createValidSatellite();
@@ -701,6 +810,49 @@ export class EntityManager {
 
     public getParticleSize(): number {
         return this.options.particleSize;
+    }
+
+    public setMaxSatellites(max: number): void {
+        this.options.maxSatellites = max;
+        console.log(`Max satellites limit set to: ${max}`);
+    }
+
+    public getMaxSatellites(): number {
+        return this.options.maxSatellites;
+    }
+
+    /**
+     * Enable or disable automatic mesh updates
+     * Useful for adding many satellites without updating the mesh each time
+     */
+    public setMeshUpdatesEnabled(enabled: boolean): void {
+        this.meshUpdatesEnabled = enabled;
+        console.log(`Mesh updates ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    /**
+     * Check if mesh updates are enabled
+     */
+    public getMeshUpdatesEnabled(): boolean {
+        return this.meshUpdatesEnabled;
+    }
+
+    /**
+     * Manually trigger a mesh update
+     * Useful after adding many satellites with mesh updates disabled
+     */
+    public forceUpdateMesh(): void {
+        console.log('Forcing mesh update...');
+        const satellites = this.getAllSatellites();
+
+        if (this.options.useWebGPURendering && this.webgpuRenderer) {
+            this.webgpuRenderer.updateSatellites(satellites, this.currentTime);
+        } else if (this.options.useInstancedMesh) {
+            this.updateInstancedMeshSystem(satellites);
+        } else {
+            this.updateParticleSystem(satellites);
+        }
+        console.log(`Mesh updated with ${satellites.length} satellites`);
     }
 
     public static isWebGPUSupported(): boolean {
