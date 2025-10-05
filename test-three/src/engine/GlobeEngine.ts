@@ -15,6 +15,7 @@ export interface GlobeEngineOptions {
     autoRotate?: boolean;
     rotationSpeed?: number;
     maxSatellites?: number;
+    useInstancedMesh?: boolean;
 }
 
 export class GlobeEngine {
@@ -56,6 +57,7 @@ export class GlobeEngine {
             autoRotate: false,
             rotationSpeed: 0.001,
             maxSatellites: 50,
+            useInstancedMesh: false,
             ...options,
         };
 
@@ -78,6 +80,7 @@ export class GlobeEngine {
         this.createGlobe();
         this.createLights();
         this.createEntityManager();
+        this.entityManager.setUseInstancedMesh(this.options.useInstancedMesh);
         this.createControls();
         this.setupEventListeners();
 

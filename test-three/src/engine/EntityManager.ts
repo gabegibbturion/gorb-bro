@@ -21,7 +21,7 @@ export class EntityManager {
     // Instanced buffer geometry for all satellites
     private instancedMesh: THREE.InstancedMesh | null = null;
     private satelliteGeometry: THREE.BufferGeometry | null = null;
-    private satelliteMaterial: THREE.PointsMaterial | null = null;
+    private satelliteMaterial: THREE.MeshBasicMaterial | null = null;
     private currentSatelliteCount: number = 0;
 
     // Particle system (legacy)
@@ -225,6 +225,7 @@ export class EntityManager {
     private updateInstanceData(satellites: SatelliteEntity[]): void {
         if (!this.instancedMesh) return;
 
+        this.instancedMesh.count = satellites.length;
         const matrix = new THREE.Matrix4();
         const color = new THREE.Color();
 
@@ -233,31 +234,34 @@ export class EntityManager {
             const position = satellite.getPositionDirect();
             const satelliteColor = satellite.getColor();
 
-            // Set position for this instance (no scaling needed for points)
             matrix.setPosition(position);
-
-            // Set the instance matrix
+            // @ts-ignore
             this.instancedMesh.setMatrixAt(index, matrix);
 
-            // Set the instance color
             color.setHex(satelliteColor);
+            // @ts-ignore
             this.instancedMesh.setColorAt(index, color);
         });
 
-        // Hide unused instances by moving them far away
-        for (let i = satellites.length; i < this.options.maxSatellites; i++) {
-            matrix.identity();
-            matrix.setPosition(new THREE.Vector3(10000, 10000, 10000));
-            this.instancedMesh.setMatrixAt(i, matrix);
+        // ONLY hide instances that WERE visible but are now unused
+        // Don't loop through all 100k every frame!
+        if (satellites.length < this.currentSatelliteCount) {
+            const hideMatrix = new THREE.Matrix4();
+            hideMatrix.setPosition(new THREE.Vector3(10000, 10000, 10000));
+
+            for (let i = satellites.length; i < this.currentSatelliteCount; i++) {
+                this.instancedMesh.setMatrixAt(i, hideMatrix);
+            }
         }
 
-        // Mark instance attributes as needing update
+        // Set the instance count to only render what we need
+        this.instancedMesh.count = satellites.length;
+
         this.instancedMesh.instanceMatrix.needsUpdate = true;
         if (this.instancedMesh.instanceColor) {
             this.instancedMesh.instanceColor.needsUpdate = true;
         }
     }
-
     private createInstancedMesh(): void {
         const satellites = this.getAllSatellites();
         if (satellites.length === 0) return;
@@ -287,7 +291,6 @@ export class EntityManager {
 
         // Enable instance colors
         this.instancedMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.options.maxSatellites * 3), 3);
-
         this.scene.add(this.instancedMesh);
 
         // Update instance data for current satellites

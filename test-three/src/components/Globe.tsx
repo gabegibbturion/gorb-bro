@@ -30,10 +30,10 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [isPaused, setIsPaused] = useState(false);
     const [timeMultiplier, setTimeMultiplier] = useState(1);
     const [showOrbits, setShowOrbits] = useState(false);
-    const [satelliteCountInput, setSatelliteCountInput] = useState<any>(1000);
+    const [satelliteCountInput, setSatelliteCountInput] = useState<any>(100);
     const [selectedEntity, setSelectedEntity] = useState<any>(null);
     const [showSidePanel, setShowSidePanel] = useState(false);
-    const [useInstancedMesh, setUseInstancedMesh] = useState(true);
+    const [useInstancedMesh, setUseInstancedMesh] = useState(false);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -46,6 +46,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             autoRotate: false, // Disable auto-rotation
             rotationSpeed: 0.0005,
             maxSatellites: 2000000,
+            useInstancedMesh: useInstancedMesh,
         });
 
         // Set up event handlers
