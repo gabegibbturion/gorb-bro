@@ -2,6 +2,7 @@ import Stats from "stats.js";
 import SunCalc from "suncalc";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { EnhancedGlobe } from "./EnhancedGlobe";
 import { EntityManager } from "./EntityManager";
 import type { OrbitalElements } from "./OrbitalElements";
 import { SatelliteEntity } from "./SatelliteEntity";
@@ -17,6 +18,7 @@ export interface GlobeEngineOptions {
   rotationSpeed?: number;
   maxSatellites?: number;
   useInstancedMesh?: boolean;
+  useEnhancedGlobe?: boolean; // Use enhanced globe with high-quality textures
 }
 
 export class GlobeEngine {
@@ -26,6 +28,7 @@ export class GlobeEngine {
   private renderer!: THREE.WebGLRenderer;
   private entityManager!: EntityManager;
   private globe!: THREE.Mesh;
+  private enhancedGlobe: EnhancedGlobe | null = null;
   private controls!: OrbitControls;
   private sunLight!: THREE.DirectionalLight;
   private stats!: Stats;
@@ -59,6 +62,7 @@ export class GlobeEngine {
       rotationSpeed: 0.001,
       maxSatellites: 50,
       useInstancedMesh: false,
+      useEnhancedGlobe: true, // Default to enhanced globe
       ...options,
     };
 
@@ -123,19 +127,46 @@ export class GlobeEngine {
   }
 
   private createGlobe(): void {
-    const geometry = new THREE.SphereGeometry(1, 64, 64);
+    if (this.options.useEnhancedGlobe) {
+      // Use enhanced globe with high-quality rendering
+      this.enhancedGlobe = new EnhancedGlobe({
+        radius: 1.0,
+        enableClouds: true,
+        enableAtmosphere: true,
+        enableNightLights: true,
+        enableCloudShadows: true,
+        speedFactor: 2.0,
+      });
 
-    // Create material with Earth texture
-    const material = new THREE.MeshPhongMaterial({
-      map: this.createEarthTexture(),
-      bumpMap: this.createBumpTexture(),
-      bumpScale: 0.02,
-      shininess: 0.1,
-    });
+      // Initialize asynchronously (textures will load in background)
+      this.enhancedGlobe.init().then(() => {
+        console.log("Enhanced globe initialized successfully");
+      }).catch((error) => {
+        console.error("Failed to initialize enhanced globe:", error);
+      });
 
-    this.globe = new THREE.Mesh(geometry, material);
-    this.globe.receiveShadow = true;
-    this.scene.add(this.globe);
+      // Add the globe group to the scene
+      const globeGroup = this.enhancedGlobe.getGroup();
+      this.scene.add(globeGroup);
+
+      // Get the earth mesh for compatibility with existing code
+      this.globe = this.enhancedGlobe.getEarth();
+    } else {
+      // Use basic globe (legacy)
+      const geometry = new THREE.SphereGeometry(1, 64, 64);
+
+      // Create material with Earth texture
+      const material = new THREE.MeshPhongMaterial({
+        map: this.createEarthTexture(),
+        bumpMap: this.createBumpTexture(),
+        bumpScale: 0.02,
+        shininess: 0.1,
+      });
+
+      this.globe = new THREE.Mesh(geometry, material);
+      this.globe.receiveShadow = true;
+      this.scene.add(this.globe);
+    }
   }
 
   private createEarthTexture(): THREE.Texture {
@@ -175,15 +206,20 @@ export class GlobeEngine {
 
   private createLights(): void {
     // Ambient light
-    const ambientLight = new THREE.AmbientLight(0x404040, 15.0);
+    const ambientLight = new THREE.AmbientLight(0x404040, this.options.useEnhancedGlobe ? 5.0 : 15.0);
     this.scene.add(ambientLight);
 
     // Directional light (sun) - position will be calculated based on current time
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 5.0);
+    this.sunLight = new THREE.DirectionalLight(0xffffff, this.options.useEnhancedGlobe ? 1.3 : 5.0);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.width = 2048;
     this.sunLight.shadow.mapSize.height = 2048;
     this.scene.add(this.sunLight);
+
+    // Set the sun light for the enhanced globe
+    if (this.enhancedGlobe) {
+      this.enhancedGlobe.setDirectionalLight(this.sunLight);
+    }
 
     // Initialize sun position
     this.updateSunPosition();
@@ -348,6 +384,11 @@ export class GlobeEngine {
     this.currentTime = new Date(this.currentTime.getTime() + deltaTime * this.timeMultiplier * 1000);
     this.entityManager.setTime(this.currentTime);
 
+    // Update enhanced globe if enabled
+    if (this.enhancedGlobe) {
+      this.enhancedGlobe.update(deltaTime * this.timeMultiplier * 1000);
+    }
+
     // Update sun position based on current time
     this.updateSunPosition();
 
@@ -468,7 +509,8 @@ export class GlobeEngine {
     satelliteCount: number;
     maxSatellites: number;
     isOptimized: boolean;
-    systemType: "instanced" | "particle";
+    systemType: "instanced" | "particle" | "webgpu";
+    webgpuReady: boolean;
   } {
     return this.entityManager.getSystemInfo();
   }
@@ -561,28 +603,54 @@ export class GlobeEngine {
   }
 
   public setGlobeVisible(visible: boolean): void {
-    this.globe.visible = visible;
+    if (this.enhancedGlobe) {
+      this.enhancedGlobe.setVisible(visible);
+    } else {
+      this.globe.visible = visible;
+    }
   }
 
   public getGlobeVisible(): boolean {
-    return this.globe.visible;
+    if (this.enhancedGlobe) {
+      return this.enhancedGlobe.getGroup().visible;
+    } else {
+      return this.globe.visible;
+    }
   }
 
   public toggleGlobeVisibility(): void {
     this.setGlobeVisible(!this.getGlobeVisible());
   }
 
+  public setUseWebGPURendering(useWebGPU: boolean): void {
+    this.entityManager.setUseWebGPURendering(useWebGPU);
+  }
+
+  public getUseWebGPURendering(): boolean {
+    return this.entityManager.getUseWebGPURendering();
+  }
+
+  public getEntityManager(): EntityManager {
+    return this.entityManager;
+  }
+
+  // Alias methods for backward compatibility
   public setUseGPURendering(useGPU: boolean): void {
-    this.entityManager.setUseGPURendering(useGPU);
+    this.setUseWebGPURendering(useGPU);
   }
 
   public getUseGPURendering(): boolean {
-    return this.entityManager.getUseGPURendering();
+    return this.getUseWebGPURendering();
   }
 
   public dispose(): void {
     this.stop();
     this.entityManager.dispose();
+
+    if (this.enhancedGlobe) {
+      this.enhancedGlobe.dispose();
+      this.enhancedGlobe = null;
+    }
 
     if (this.controls) {
       this.controls.dispose();
@@ -599,5 +667,9 @@ export class GlobeEngine {
     if (this.container && this.renderer) {
       this.container.removeChild(this.renderer.domElement);
     }
+  }
+
+  public getEnhancedGlobe(): EnhancedGlobe | null {
+    return this.enhancedGlobe;
   }
 }

@@ -1,17 +1,18 @@
 import * as THREE from "three";
-import { GPUSatelliteSystem, type GPUSatelliteSystemOptions } from "./GPUSatelliteSystem";
 import type { OrbitalElements } from "./OrbitalElements";
 import { OrbitalElementsGenerator } from "./OrbitalElements";
 import type { SatelliteEntityOptions } from "./SatelliteEntity";
 import { SatelliteEntity } from "./SatelliteEntity";
+import { WebGPUSatelliteRenderer, type WebGPUSatelliteRendererOptions } from "./WebGPUSatelliteRenderer";
 
 export interface EntityManagerOptions {
     maxSatellites?: number;
     autoCleanup?: boolean;
     updateInterval?: number;
     useInstancedMesh?: boolean; // Toggle between particle system and instanced mesh
-    useGPURendering?: boolean; // Toggle GPU-based rendering system
+    useWebGPURendering?: boolean; // Toggle WebGPU-based rendering system
     enableOcclusionCulling?: boolean; // Toggle occlusion culling
+    particleSize?: number; // Size of particles for WebGPU rendering
 }
 
 export class EntityManager {
@@ -32,8 +33,8 @@ export class EntityManager {
     private particleGeometry: THREE.BufferGeometry | null = null;
     private particleMaterial: THREE.PointsMaterial | null = null;
 
-    // GPU rendering system
-    private gpuSystem: GPUSatelliteSystem | null = null;
+    // WebGPU rendering system
+    private webgpuRenderer: WebGPUSatelliteRenderer | null = null;
     private renderer: THREE.WebGLRenderer | null = null;
 
     // Event callbacks
@@ -48,8 +49,9 @@ export class EntityManager {
             autoCleanup: true,
             updateInterval: 1000, // 1 second
             useInstancedMesh: true, // Default to instanced mesh
-            useGPURendering: false, // Default to false, enable for high performance
+            useWebGPURendering: false, // Default to false, enable for high performance
             enableOcclusionCulling: false, // Default to enabled
+            particleSize: 0.01, // Default particle size
             ...options,
         };
     }
@@ -168,9 +170,9 @@ export class EntityManager {
     private updateInstancedMesh(): void {
         const satellites = this.getAllSatellites();
 
-        if (this.options.useGPURendering && this.gpuSystem) {
-            // Use GPU rendering system
-            this.gpuSystem.updateSatellites(satellites, this.currentTime);
+        if (this.options.useWebGPURendering && this.webgpuRenderer) {
+            // Use WebGPU rendering system
+            this.webgpuRenderer.updateSatellites(satellites, this.currentTime);
         } else if (this.options.useInstancedMesh) {
             // Use instanced mesh system
             this.updateInstancedMeshSystem(satellites);
@@ -614,13 +616,18 @@ export class EntityManager {
         satelliteCount: number;
         maxSatellites: number;
         isOptimized: boolean;
-        systemType: "instanced" | "particle";
+        systemType: "instanced" | "particle" | "webgpu";
+        webgpuReady: boolean;
     } {
         return {
             satelliteCount: this.currentSatelliteCount,
             maxSatellites: this.options.maxSatellites,
-            isOptimized: this.options.useInstancedMesh ? this.instancedMesh !== null : this.particleSystem !== null,
-            systemType: this.options.useInstancedMesh ? "instanced" : "particle",
+            isOptimized: this.options.useWebGPURendering ?
+                (this.webgpuRenderer !== null && this.webgpuRenderer.isReady()) :
+                (this.options.useInstancedMesh ? this.instancedMesh !== null : this.particleSystem !== null),
+            systemType: this.options.useWebGPURendering ? "webgpu" :
+                (this.options.useInstancedMesh ? "instanced" : "particle"),
+            webgpuReady: this.webgpuRenderer ? this.webgpuRenderer.isReady() : false,
         };
     }
 
@@ -658,8 +665,8 @@ export class EntityManager {
 
     public setOcclusionCulling(enabled: boolean): void {
         this.options.enableOcclusionCulling = enabled;
-        if (this.gpuSystem) {
-            this.gpuSystem.setOcclusionCulling(enabled);
+        if (this.webgpuRenderer) {
+            this.webgpuRenderer.setOcclusionCulling(enabled);
         }
     }
 
@@ -669,52 +676,101 @@ export class EntityManager {
 
     public setRenderer(renderer: THREE.WebGLRenderer): void {
         this.renderer = renderer;
-        this.initializeGPUSystem();
+        this.initializeWebGPUSystem();
     }
 
-    public setUseGPURendering(useGPU: boolean): void {
-        this.options.useGPURendering = useGPU;
-        if (useGPU && this.renderer) {
-            this.initializeGPUSystem();
-        } else if (!useGPU && this.gpuSystem) {
-            this.cleanupGPUSystem();
+    public setUseWebGPURendering(useWebGPU: boolean): void {
+        this.options.useWebGPURendering = useWebGPU;
+        if (useWebGPU && this.renderer) {
+            this.initializeWebGPUSystem();
+        } else if (!useWebGPU && this.webgpuRenderer) {
+            this.cleanupWebGPUSystem();
         }
     }
 
-    public getUseGPURendering(): boolean {
-        return this.options.useGPURendering;
+    public getUseWebGPURendering(): boolean {
+        return this.options.useWebGPURendering;
     }
 
-    private initializeGPUSystem(): void {
-        if (!this.renderer || !this.options.useGPURendering) return;
+    public setParticleSize(size: number): void {
+        this.options.particleSize = size;
+        if (this.webgpuRenderer) {
+            this.webgpuRenderer.setParticleSize(size);
+        }
+    }
 
-        this.cleanupGPUSystem();
+    public getParticleSize(): number {
+        return this.options.particleSize;
+    }
+
+    public static isWebGPUSupported(): boolean {
+        return typeof navigator !== 'undefined' && 'gpu' in navigator;
+    }
+
+    public getWebGPUSupportInfo(): {
+        supported: boolean;
+        reason?: string;
+        fallbackSystem: 'instanced' | 'particle';
+    } {
+        if (!EntityManager.isWebGPUSupported()) {
+            return {
+                supported: false,
+                reason: 'WebGPU not supported in this browser',
+                fallbackSystem: this.options.useInstancedMesh ? 'instanced' : 'particle'
+            };
+        }
+
+        if (this.webgpuRenderer && this.webgpuRenderer.isReady()) {
+            return {
+                supported: true,
+                fallbackSystem: this.options.useInstancedMesh ? 'instanced' : 'particle'
+            };
+        }
+
+        return {
+            supported: false,
+            reason: 'WebGPU adapter not available (try enabling experimental features)',
+            fallbackSystem: this.options.useInstancedMesh ? 'instanced' : 'particle'
+        };
+    }
+
+    private initializeWebGPUSystem(): void {
+        if (!this.renderer || !this.options.useWebGPURendering) return;
+
+        this.cleanupWebGPUSystem();
 
         try {
-            const gpuOptions: GPUSatelliteSystemOptions = {
+            const webgpuOptions: WebGPUSatelliteRendererOptions = {
                 maxSatellites: this.options.maxSatellites,
-                textureSize: Math.ceil(Math.sqrt(this.options.maxSatellites)),
-                enableOcclusionCulling: this.options.enableOcclusionCulling
+                enableOcclusionCulling: this.options.enableOcclusionCulling,
+                particleSize: this.options.particleSize,
+                useInstancedRendering: true
             };
 
-            this.gpuSystem = new GPUSatelliteSystem(this.renderer, this.scene, gpuOptions);
+            this.webgpuRenderer = new WebGPUSatelliteRenderer(this.renderer, this.scene, webgpuOptions);
 
-            // Check if GPU system initialized properly
-            if (!this.gpuSystem) {
-                console.warn('GPU system failed to initialize, falling back to CPU rendering');
-                this.options.useGPURendering = false;
+            // Check if WebGPU system initialized properly
+            if (!this.webgpuRenderer || !this.webgpuRenderer.isReady()) {
+                console.warn('WebGPU system failed to initialize, falling back to instanced mesh rendering');
+                this.options.useWebGPURendering = false;
+                this.options.useInstancedMesh = true; // Fallback to instanced mesh
+                this.webgpuRenderer = null;
+            } else {
+                console.log('WebGPU system initialized successfully');
             }
         } catch (error) {
-            console.error('Failed to initialize GPU system:', error);
-            this.options.useGPURendering = false;
-            this.gpuSystem = null;
+            console.error('Failed to initialize WebGPU system:', error);
+            console.log('Falling back to instanced mesh rendering');
+            this.options.useWebGPURendering = false;
+            this.options.useInstancedMesh = true; // Fallback to instanced mesh
+            this.webgpuRenderer = null;
         }
     }
 
-    private cleanupGPUSystem(): void {
-        if (this.gpuSystem) {
-            this.gpuSystem.dispose();
-            this.gpuSystem = null;
+    private cleanupWebGPUSystem(): void {
+        if (this.webgpuRenderer) {
+            this.webgpuRenderer.dispose();
+            this.webgpuRenderer = null;
         }
     }
 
@@ -722,8 +778,8 @@ export class EntityManager {
         this.clearAll();
         this.satellites.clear();
 
-        // Clean up GPU system
-        this.cleanupGPUSystem();
+        // Clean up WebGPU system
+        this.cleanupWebGPUSystem();
 
         // Clean up instanced mesh
         if (this.instancedMesh) {

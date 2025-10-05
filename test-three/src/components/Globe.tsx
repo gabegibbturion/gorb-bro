@@ -34,10 +34,12 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [selectedEntity, setSelectedEntity] = useState<any>(null);
     const [showSidePanel, setShowSidePanel] = useState(false);
     const [useInstancedMesh, setUseInstancedMesh] = useState(false);
-    const [useGPURendering, setUseGPURendering] = useState(false);
+    const [useWebGPURendering, setUseWebGPURendering] = useState(false);
     const [tleLoading, setTleLoading] = useState(false);
     const [occlusionCulling, setOcclusionCulling] = useState(true);
     const [globeVisible, setGlobeVisible] = useState(true);
+    const [cloudsVisible, setCloudsVisible] = useState(true);
+    const [atmosphereVisible, setAtmosphereVisible] = useState(true);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -295,9 +297,35 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
     const toggleGPURendering = () => {
         if (!engineRef.current) return;
-        const newValue = !useGPURendering;
-        setUseGPURendering(newValue);
-        engineRef.current.setUseGPURendering(newValue);
+        const newValue = !useWebGPURendering;
+        setUseWebGPURendering(newValue);
+        engineRef.current.setUseWebGPURendering(newValue);
+
+        // Show WebGPU support info
+        const supportInfo = engineRef.current.getEntityManager().getWebGPUSupportInfo();
+        if (!supportInfo.supported) {
+            console.warn('WebGPU not supported:', supportInfo.reason);
+        }
+    };
+
+    const toggleClouds = () => {
+        if (!engineRef.current) return;
+        const enhancedGlobe = engineRef.current.getEnhancedGlobe();
+        if (enhancedGlobe) {
+            const newValue = !cloudsVisible;
+            setCloudsVisible(newValue);
+            enhancedGlobe.setCloudsVisible(newValue);
+        }
+    };
+
+    const toggleAtmosphere = () => {
+        if (!engineRef.current) return;
+        const enhancedGlobe = engineRef.current.getEnhancedGlobe();
+        if (enhancedGlobe) {
+            const newValue = !atmosphereVisible;
+            setAtmosphereVisible(newValue);
+            enhancedGlobe.setAtmosphereVisible(newValue);
+        }
     };
 
     return (
@@ -333,9 +361,16 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 <div>
                     Speed: {timeMultiplier}x {isPaused ? "(Paused)" : ""}
                 </div>
-                <div>System: {useGPURendering ? "GPU Rendering" : useInstancedMesh ? "Instanced Mesh" : "Particle System"}</div>
+                <div>System: {useWebGPURendering ? "WebGPU Rendering" : useInstancedMesh ? "Instanced Mesh" : "Particle System"}</div>
+                {useWebGPURendering && (
+                    <div style={{ fontSize: '10px', color: '#ff9800' }}>
+                        WebGPU: {engineRef.current?.getSystemInfo().webgpuReady ? "Ready" : "Not Available"}
+                    </div>
+                )}
                 <div>Occlusion: {occlusionCulling ? "Enabled" : "Disabled"}</div>
                 <div>Globe: {globeVisible ? "Visible" : "Hidden"}</div>
+                <div>Clouds: {cloudsVisible ? "Visible" : "Hidden"}</div>
+                <div>Atmosphere: {atmosphereVisible ? "Visible" : "Hidden"}</div>
 
                 <div style={{ marginTop: "10px" }}>
                     <div style={{ marginBottom: "5px", fontWeight: "bold" }}>TLE File Controls:</div>
@@ -423,9 +458,21 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     </button>
                     <button
                         onClick={toggleGPURendering}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: useGPURendering ? "#4CAF50" : "#2196F3" }}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: useWebGPURendering ? "#4CAF50" : "#2196F3" }}
                     >
-                        {useGPURendering ? "Disable GPU" : "Enable GPU"}
+                        {useWebGPURendering ? "Disable WebGPU" : "Enable WebGPU"}
+                    </button>
+                    <button
+                        onClick={toggleClouds}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: cloudsVisible ? "#4CAF50" : "#666" }}
+                    >
+                        {cloudsVisible ? "Hide Clouds" : "Show Clouds"}
+                    </button>
+                    <button
+                        onClick={toggleAtmosphere}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: atmosphereVisible ? "#4CAF50" : "#666" }}
+                    >
+                        {atmosphereVisible ? "Hide Atmosphere" : "Show Atmosphere"}
                     </button>
                 </div>
 
