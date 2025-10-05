@@ -148,11 +148,6 @@ export class EntityManager {
         // Update instanced mesh positions and colors
         this.updateInstancedMesh();
 
-        // Update time uniform for shader animation
-        if (this.satelliteMaterial) {
-            this.satelliteMaterial.uniforms.time.value = time.getTime() * 0.0005;
-        }
-
         // Trigger update callback
         if (this.onUpdate) {
             this.onUpdate(this.getAllSatellites());
@@ -231,16 +226,42 @@ export class EntityManager {
         if (!this.instancedMesh || !this.satelliteGeometry) return;
 
         const translateAttribute = this.satelliteGeometry.attributes.translate as THREE.InstancedBufferAttribute;
+        const colorAttribute = this.satelliteGeometry.attributes.color as THREE.InstancedBufferAttribute;
         const translateArray = translateAttribute.array as Float32Array;
+        const colorArray = colorAttribute.array as Float32Array;
 
-        // Update positions for active satellites
+        // Update positions and colors for active satellites
         satellites.forEach((satellite, index) => {
             const position = satellite.getPositionDirect();
+            const satelliteColor = satellite.getColor();
+            const color = new THREE.Color(satelliteColor);
+
             const i3 = index * 3;
 
-            translateArray[i3 + 0] = position.x;
-            translateArray[i3 + 1] = position.y;
-            translateArray[i3 + 2] = position.z;
+            // Check if satellite is behind the globe (occlusion culling)
+            const distanceFromOrigin = position.length();
+            const globeRadius = 1.0; // Globe radius in our coordinate system
+
+            if (distanceFromOrigin < globeRadius) {
+                // Satellite is behind/inside the globe, hide it
+                translateArray[i3 + 0] = 10000;
+                translateArray[i3 + 1] = 10000;
+                translateArray[i3 + 2] = 10000;
+
+                // Set color to transparent
+                colorArray[i3 + 0] = 0;
+                colorArray[i3 + 1] = 0;
+                colorArray[i3 + 2] = 0;
+            } else {
+                // Satellite is visible, update position and color
+                translateArray[i3 + 0] = position.x;
+                translateArray[i3 + 1] = position.y;
+                translateArray[i3 + 2] = position.z;
+
+                colorArray[i3 + 0] = color.r;
+                colorArray[i3 + 1] = color.g;
+                colorArray[i3 + 2] = color.b;
+            }
         });
 
         // Hide unused instances by moving them far away
@@ -249,10 +270,16 @@ export class EntityManager {
             translateArray[i3 + 0] = 10000;
             translateArray[i3 + 1] = 10000;
             translateArray[i3 + 2] = 10000;
+
+            // Set unused colors to black
+            colorArray[i3 + 0] = 0;
+            colorArray[i3 + 1] = 0;
+            colorArray[i3 + 2] = 0;
         }
 
         // Mark attributes as needing update
         translateAttribute.needsUpdate = true;
+        colorAttribute.needsUpdate = true;
     }
     private createInstancedMesh(): void {
         const satellites = this.getAllSatellites();
@@ -265,16 +292,40 @@ export class EntityManager {
             this.satelliteMaterial?.dispose();
         }
 
-        // Create circle geometry for instanced buffer geometry
-        const circleGeometry = new THREE.CircleGeometry(0.01, 6);
-
+        // Create a simple quad geometry for true circle rendering
         this.satelliteGeometry = new THREE.InstancedBufferGeometry();
-        this.satelliteGeometry.index = circleGeometry.index;
-        this.satelliteGeometry.attributes = circleGeometry.attributes;
+
+        // Create a simple quad (two triangles)
+        const positions = new Float32Array([
+            -0.5, -0.5, 0,  // bottom left
+            0.5, -0.5, 0,  // bottom right
+            0.5, 0.5, 0,  // top right
+            -0.5, 0.5, 0   // top left
+        ]);
+
+        const uvs = new Float32Array([
+            0, 0,  // bottom left
+            1, 0,  // bottom right
+            1, 1,  // top right
+            0, 1   // top left
+        ]);
+
+        const indices = new Uint16Array([
+            0, 1, 2,  // first triangle
+            0, 2, 3   // second triangle
+        ]);
+
+        this.satelliteGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        this.satelliteGeometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        this.satelliteGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
 
         // Create translate array for instance positions
         const translateArray = new Float32Array(this.options.maxSatellites * 3);
         this.satelliteGeometry.setAttribute('translate', new THREE.InstancedBufferAttribute(translateArray, 3));
+
+        // Create color array for instance colors
+        const colorArray = new Float32Array(this.options.maxSatellites * 3);
+        this.satelliteGeometry.setAttribute('color', new THREE.InstancedBufferAttribute(colorArray, 3));
 
         // Create raw shader material for billboard behavior
         this.satelliteMaterial = new THREE.RawShaderMaterial({
@@ -290,47 +341,32 @@ export class EntityManager {
                 attribute vec3 position;
                 attribute vec2 uv;
                 attribute vec3 translate;
+                attribute vec3 color;
 
                 varying vec2 vUv;
-                varying float vScale;
+                varying vec3 vColor;
 
                 void main() {
                     vec4 mvPosition = modelViewMatrix * vec4(translate, 1.0);
-                    vec3 trTime = vec3(translate.x + time, translate.y + time, translate.z + time);
-                    float scale = sin(trTime.x * 2.1) + sin(trTime.y * 3.2) + sin(trTime.z * 4.3);
-                    vScale = scale;
-                    scale = scale * 0.1 + 1.0; // Smaller scale for satellites
-                    mvPosition.xyz += position * scale;
+                    mvPosition.xyz += position * 0.02; // Fixed size for satellites
                     vUv = uv;
+                    vColor = color;
                     gl_Position = projectionMatrix * mvPosition;
                 }
             `,
             fragmentShader: `
                 precision highp float;
                 varying vec2 vUv;
-                varying float vScale;
-
-                vec3 HUEtoRGB(float H){
-                    H = mod(H,1.0);
-                    float R = abs(H * 6.0 - 3.0) - 1.0;
-                    float G = 2.0 - abs(H * 6.0 - 2.0);
-                    float B = 2.0 - abs(H * 6.0 - 4.0);
-                    return clamp(vec3(R,G,B),0.0,1.0);
-                }
-
-                vec3 HSLtoRGB(vec3 HSL){
-                    vec3 RGB = HUEtoRGB(HSL.x);
-                    float C = (1.0 - abs(2.0 * HSL.z - 1.0)) * HSL.y;
-                    return (RGB - 0.5) * C + HSL.z;
-                }
+                varying vec3 vColor;
 
                 void main() {
                     vec2 center = vUv - 0.5;
                     float dist = length(center);
                     if (dist > 0.5) discard;
                     
-                    vec3 color = HSLtoRGB(vec3(vScale/5.0, 1.0, 0.5));
-                    gl_FragColor = vec4(color, 1.0);
+                    // Create smooth circle with anti-aliasing
+                    float alpha = 1.0 - smoothstep(0.4, 0.5, dist);
+                    gl_FragColor = vec4(vColor, alpha);
                 }
             `,
             depthTest: true,

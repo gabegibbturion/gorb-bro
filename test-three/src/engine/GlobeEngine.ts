@@ -133,7 +133,7 @@ export class GlobeEngine {
 
     this.globe = new THREE.Mesh(geometry, material);
     this.globe.receiveShadow = true;
-    this.scene.add(this.globe);
+    // this.scene.add(this.globe);
   }
 
   private createEarthTexture(): THREE.Texture {
@@ -240,42 +240,49 @@ export class GlobeEngine {
     // Update the picking ray with the camera and mouse position
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
-    // Get the current system from entity manager for intersection testing
-    const currentSystem = this.entityManager.getCurrentSystem();
-    if (!currentSystem) {
-      // No satellites to select
+    // Get all satellites for manual raycasting
+    const satellites = this.entityManager.getAllSatellites();
+    if (satellites.length === 0) {
       this.selectEntity(null);
       return;
     }
 
-    // Calculate objects intersecting the picking ray
-    const intersects = this.raycaster.intersectObject(currentSystem);
+    // Manual raycasting for instanced geometry
+    let closestSatellite: SatelliteEntity | null = null;
+    let closestDistance = Infinity;
+    const selectionThreshold = 0.05; // Adjust based on satellite size
 
-    if (intersects.length > 0) {
-      // Find the closest satellite to the intersection point
-      const intersectionPoint = intersects[0].point;
-      const satellites = this.entityManager.getAllSatellites();
+    satellites.forEach((satellite) => {
+      const satellitePosition = satellite.getPosition();
 
-      let closestSatellite: SatelliteEntity | null = null;
-      let closestDistance = Infinity;
+      // Calculate distance from ray to satellite position
+      const rayOrigin = this.raycaster.ray.origin;
+      const rayDirection = this.raycaster.ray.direction;
 
-      satellites.forEach((satellite) => {
-        const satellitePosition = satellite.getPosition();
-        const distance = intersectionPoint.distanceTo(satellitePosition);
-        if (distance < closestDistance) {
-          closestDistance = distance;
+      // Vector from ray origin to satellite
+      const toSatellite = satellitePosition.clone().sub(rayOrigin);
+
+      // Project toSatellite onto ray direction
+      const projectionLength = toSatellite.dot(rayDirection);
+
+      // Closest point on ray to satellite
+      const closestPointOnRay = rayOrigin.clone().add(rayDirection.clone().multiplyScalar(projectionLength));
+
+      // Distance from satellite to closest point on ray
+      const distanceToRay = satellitePosition.distanceTo(closestPointOnRay);
+
+      // Only consider satellites in front of the camera
+      if (projectionLength > 0 && distanceToRay < selectionThreshold) {
+        if (distanceToRay < closestDistance) {
+          closestDistance = distanceToRay;
           closestSatellite = satellite;
         }
-      });
-
-      if (closestSatellite && closestDistance < 0.1) {
-        // Within reasonable selection distance
-        this.selectEntity(closestSatellite);
-      } else {
-        this.selectEntity(null);
       }
+    });
+
+    if (closestSatellite) {
+      this.selectEntity(closestSatellite);
     } else {
-      // Clicked on empty space, deselect
       this.selectEntity(null);
     }
   }
