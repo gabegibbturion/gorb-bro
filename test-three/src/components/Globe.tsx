@@ -34,6 +34,10 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [selectedEntity, setSelectedEntity] = useState<any>(null);
     const [showSidePanel, setShowSidePanel] = useState(false);
     const [useInstancedMesh, setUseInstancedMesh] = useState(false);
+    const [useGPURendering, setUseGPURendering] = useState(false);
+    const [tleLoading, setTleLoading] = useState(false);
+    const [occlusionCulling, setOcclusionCulling] = useState(true);
+    const [globeVisible, setGlobeVisible] = useState(true);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -185,24 +189,6 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         }
     };
 
-    const resetTime = () => {
-        if (!engineRef.current) return;
-        const now = new Date();
-        engineRef.current.setTime(now);
-        setCurrentTime(now);
-    };
-
-    const fastForward = () => {
-        if (!engineRef.current) return;
-        const newMultiplier = timeMultiplier * 2;
-        handleSetTimeMultiplier(newMultiplier);
-    };
-
-    const rewind = () => {
-        if (!engineRef.current) return;
-        const newMultiplier = timeMultiplier / 2;
-        handleSetTimeMultiplier(newMultiplier);
-    };
 
     const populateGlobe = () => {
         if (!engineRef.current) return;
@@ -248,6 +234,72 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         setShowOrbits(!showOrbits);
     };
 
+    const loadTLEFile = async (maxCount: number = 0) => {
+        if (!engineRef.current) return;
+
+        setTleLoading(true);
+        try {
+            // Load the TLE file from assets - try multiple possible paths
+            let response;
+            try {
+                response = await fetch('/src/assets/gp.txt');
+            } catch {
+                try {
+                    response = await fetch('/assets/gp.txt');
+                } catch {
+                    response = await fetch('./src/assets/gp.txt');
+                }
+            }
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch TLE file: ${response.status}`);
+            }
+
+            const content = await response.text();
+
+            // Clear existing satellites first
+            clearAllSatellites();
+
+            // Load TLEs into the globe
+            const satellites = engineRef.current.loadTLEFromFile(content, maxCount);
+            console.log(`Loaded ${satellites.length} satellites from TLE file`);
+        } catch (error) {
+            console.error('Failed to load TLE file:', error);
+            alert('Failed to load TLE file. Please check that gp.txt exists in the assets folder.');
+        } finally {
+            setTleLoading(false);
+        }
+    };
+
+    const loadFirst1000TLEs = () => {
+        loadTLEFile(1000);
+    };
+
+    const loadAllTLEs = () => {
+        loadTLEFile(0); // 0 means load all
+    };
+
+    const toggleOcclusionCulling = () => {
+        if (!engineRef.current) return;
+        const newValue = !occlusionCulling;
+        setOcclusionCulling(newValue);
+        engineRef.current.setOcclusionCulling(newValue);
+    };
+
+    const toggleGlobeVisibility = () => {
+        if (!engineRef.current) return;
+        const newValue = !globeVisible;
+        setGlobeVisible(newValue);
+        engineRef.current.setGlobeVisible(newValue);
+    };
+
+    const toggleGPURendering = () => {
+        if (!engineRef.current) return;
+        const newValue = !useGPURendering;
+        setUseGPURendering(newValue);
+        engineRef.current.setUseGPURendering(newValue);
+    };
+
     return (
         <div style={{ position: "relative", width: "100%", height: "100%", ...style }} className={className}>
             {/* Globe container */}
@@ -281,7 +333,45 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 <div>
                     Speed: {timeMultiplier}x {isPaused ? "(Paused)" : ""}
                 </div>
-                <div>System: {useInstancedMesh ? "Instanced Mesh" : "Particle System"}</div>
+                <div>System: {useGPURendering ? "GPU Rendering" : useInstancedMesh ? "Instanced Mesh" : "Particle System"}</div>
+                <div>Occlusion: {occlusionCulling ? "Enabled" : "Disabled"}</div>
+                <div>Globe: {globeVisible ? "Visible" : "Hidden"}</div>
+
+                <div style={{ marginTop: "10px" }}>
+                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>TLE File Controls:</div>
+                    <button
+                        onClick={loadFirst1000TLEs}
+                        disabled={tleLoading}
+                        style={{
+                            margin: "2px",
+                            padding: "5px",
+                            fontSize: "10px",
+                            backgroundColor: tleLoading ? "#666" : "#FF9800",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "3px",
+                            cursor: tleLoading ? "not-allowed" : "pointer"
+                        }}
+                    >
+                        {tleLoading ? "Loading..." : "Load First 1000 TLEs"}
+                    </button>
+                    <button
+                        onClick={loadAllTLEs}
+                        disabled={tleLoading}
+                        style={{
+                            margin: "2px",
+                            padding: "5px",
+                            fontSize: "10px",
+                            backgroundColor: tleLoading ? "#666" : "#F44336",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "3px",
+                            cursor: tleLoading ? "not-allowed" : "pointer"
+                        }}
+                    >
+                        {tleLoading ? "Loading..." : "Load All TLEs"}
+                    </button>
+                </div>
 
                 <div style={{ marginTop: "10px" }}>
                     <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Satellite Controls:</div>
@@ -303,40 +393,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             Add {satelliteCountInput} Satellites
                         </button>
                     </div>
-                    <button onClick={addRandomSatellite} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        Add Single Satellite
-                    </button>
-                    <button
-                        onClick={() => {
-                            if (engineRef.current) {
-                                engineRef.current.addValidSatellite();
-                            }
-                        }}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px" }}
-                    >
-                        Add Valid TLE
-                    </button>
-                    <button
-                        onClick={() => {
-                            if (engineRef.current) {
-                                for (let i = 0; i < 10; i++) {
-                                    engineRef.current.addRandomTLEFromCOE();
-                                }
-                            }
-                        }}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: "#2196F3" }}
-                    >
-                        Add Random TLE
-                    </button>
-                    <button onClick={populateGlobe} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: "#4CAF50" }}>
-                        Populate Globe
-                    </button>
-                    <button onClick={removeRandomSatellite} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        Remove Random
-                    </button>
-                    <button onClick={clearAllSatellites} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        Clear All
-                    </button>
+
                     <button onClick={toggleOrbits} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: showOrbits ? "#4CAF50" : "#666" }}>
                         {showOrbits ? "Hide Orbits" : "Show Orbits"}
                     </button>
@@ -352,21 +409,30 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     >
                         {useInstancedMesh ? "Use Particle System" : "Use Instanced Mesh"}
                     </button>
+                    <button
+                        onClick={toggleOcclusionCulling}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: occlusionCulling ? "#4CAF50" : "#666" }}
+                    >
+                        {occlusionCulling ? "Disable Occlusion" : "Enable Occlusion"}
+                    </button>
+                    <button
+                        onClick={toggleGlobeVisibility}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: globeVisible ? "#4CAF50" : "#666" }}
+                    >
+                        {globeVisible ? "Hide Globe" : "Show Globe"}
+                    </button>
+                    <button
+                        onClick={toggleGPURendering}
+                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: useGPURendering ? "#4CAF50" : "#2196F3" }}
+                    >
+                        {useGPURendering ? "Disable GPU" : "Enable GPU"}
+                    </button>
                 </div>
 
                 <div style={{ marginTop: "10px" }}>
                     <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Time Controls:</div>
                     <button onClick={togglePause} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: isPaused ? "#4CAF50" : "#f44336" }}>
                         {isPaused ? "Play" : "Pause"}
-                    </button>
-                    <button onClick={rewind} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        ⏪ Rewind
-                    </button>
-                    <button onClick={fastForward} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        ⏩ Fast Forward
-                    </button>
-                    <button onClick={resetTime} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        🔄 Reset
                     </button>
                 </div>
 

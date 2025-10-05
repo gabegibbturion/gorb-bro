@@ -48,7 +48,7 @@ export class ParticleEngine {
         // Disable Three.js shader errors globally for better performance
         THREE.WebGLRenderer.prototype.debug = {
             checkShaderErrors: false,
-            onShaderError: () => {},
+            onShaderError: () => { },
         };
 
         this.createScene();
@@ -73,24 +73,24 @@ export class ParticleEngine {
 
     private createCamera(): void {
         const aspect = this.options.width / this.options.height;
-        this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 10000);
+        this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 100000);
         this.camera.position.z = 2750;
     }
 
     private createRenderer(): void {
         this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            alpha: true,
+            antialias: false,
+            alpha: false,
             powerPreference: "high-performance",
         });
         this.renderer.setSize(this.options.width, this.options.height);
         this.renderer.setPixelRatio(window.devicePixelRatio);
 
         // Disable shader errors and warnings for better performance
-        this.renderer.debug = {
-            checkShaderErrors: false,
-            onShaderError: () => {},
-        };
+        // this.renderer.debug = {
+        //     checkShaderErrors: false,
+        //     onShaderError: () => { },
+        // };
 
         this.container.appendChild(this.renderer.domElement);
     }

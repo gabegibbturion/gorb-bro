@@ -5,6 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EntityManager } from "./EntityManager";
 import type { OrbitalElements } from "./OrbitalElements";
 import { SatelliteEntity } from "./SatelliteEntity";
+import { TLEParser } from "./TLEParser";
 
 export interface GlobeEngineOptions {
   container: HTMLElement;
@@ -96,26 +97,27 @@ export class GlobeEngine {
 
   private createCamera(): void {
     const aspect = this.options.width / this.options.height;
-    this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 10);
+    this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 100);
     this.camera.position.set(0, 0, 5);
   }
 
   private createRenderer(): void {
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
+      antialias: false,
+      alpha: false,
       powerPreference: "high-performance",
     });
     this.renderer.setSize(this.options.width, this.options.height);
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-    // this.renderer.shadowMap.enabled = true;
-    // this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setPixelRatio(1);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Disable shader errors and warnings for better performance
-    this.renderer.debug = {
-      checkShaderErrors: false,
-      onShaderError: () => { },
-    };
+    // this.renderer.debug = {
+    //   checkShaderErrors: false,
+    //   onShaderError: () => { },
+    // };
 
     this.container.appendChild(this.renderer.domElement);
   }
@@ -133,7 +135,7 @@ export class GlobeEngine {
 
     this.globe = new THREE.Mesh(geometry, material);
     this.globe.receiveShadow = true;
-    // this.scene.add(this.globe);
+    this.scene.add(this.globe);
   }
 
   private createEarthTexture(): THREE.Texture {
@@ -193,6 +195,9 @@ export class GlobeEngine {
       autoCleanup: true,
       updateInterval: 16, // Update every frame (60fps)
     });
+
+    // Set renderer for GPU system
+    this.entityManager.setRenderer(this.renderer);
 
     // Set up entity manager callbacks
     this.entityManager.onUpdateCallback((satellites) => {
@@ -501,6 +506,78 @@ export class GlobeEngine {
 
   public deselectEntity(): void {
     this.selectEntity(null);
+  }
+
+  public loadTLEFromFile(content: string, maxCount: number = 0): SatelliteEntity[] {
+    const parsedTLEs = TLEParser.parseTLEFile(content, maxCount);
+    const satellites: SatelliteEntity[] = [];
+
+    console.log(`Parsed ${parsedTLEs.length} TLEs from file`);
+
+    parsedTLEs.forEach((parsedTLE, index) => {
+      try {
+        const tleData = TLEParser.toTLEData(parsedTLE);
+        const satellite = this.entityManager.addSatellite(tleData, {
+          name: parsedTLE.name,
+          color: this.getRandomColor(),
+          size: 0.005 + Math.random() * 0.005,
+          showTrail: false,
+          trailLength: 50,
+          trailColor: this.getRandomColor(),
+        });
+
+        if (satellite) {
+          satellites.push(satellite);
+        }
+      } catch (error) {
+        console.warn(`Failed to create satellite from TLE ${index}:`, error);
+      }
+    });
+
+    return satellites;
+  }
+
+  public loadTLEFromURL(url: string, maxCount: number = 0): Promise<SatelliteEntity[]> {
+    return fetch(url)
+      .then(response => response.text())
+      .then(content => this.loadTLEFromFile(content, maxCount))
+      .catch(error => {
+        console.error('Failed to load TLE file:', error);
+        return [];
+      });
+  }
+
+  private getRandomColor(): number {
+    const colors = [0xffff00, 0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xff8800, 0x8800ff];
+    return colors[Math.floor(Math.random() * colors.length)];
+  }
+
+  public setOcclusionCulling(enabled: boolean): void {
+    this.entityManager.setOcclusionCulling(enabled);
+  }
+
+  public getOcclusionCulling(): boolean {
+    return this.entityManager.getOcclusionCulling();
+  }
+
+  public setGlobeVisible(visible: boolean): void {
+    this.globe.visible = visible;
+  }
+
+  public getGlobeVisible(): boolean {
+    return this.globe.visible;
+  }
+
+  public toggleGlobeVisibility(): void {
+    this.setGlobeVisible(!this.getGlobeVisible());
+  }
+
+  public setUseGPURendering(useGPU: boolean): void {
+    this.entityManager.setUseGPURendering(useGPU);
+  }
+
+  public getUseGPURendering(): boolean {
+    return this.entityManager.getUseGPURendering();
   }
 
   public dispose(): void {

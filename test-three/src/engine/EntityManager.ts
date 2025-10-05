@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GPUSatelliteSystem, type GPUSatelliteSystemOptions } from "./GPUSatelliteSystem";
 import type { OrbitalElements } from "./OrbitalElements";
 import { OrbitalElementsGenerator } from "./OrbitalElements";
 import type { SatelliteEntityOptions } from "./SatelliteEntity";
@@ -9,6 +10,8 @@ export interface EntityManagerOptions {
     autoCleanup?: boolean;
     updateInterval?: number;
     useInstancedMesh?: boolean; // Toggle between particle system and instanced mesh
+    useGPURendering?: boolean; // Toggle GPU-based rendering system
+    enableOcclusionCulling?: boolean; // Toggle occlusion culling
 }
 
 export class EntityManager {
@@ -29,6 +32,10 @@ export class EntityManager {
     private particleGeometry: THREE.BufferGeometry | null = null;
     private particleMaterial: THREE.PointsMaterial | null = null;
 
+    // GPU rendering system
+    private gpuSystem: GPUSatelliteSystem | null = null;
+    private renderer: THREE.WebGLRenderer | null = null;
+
     // Event callbacks
     private onSatelliteAdded?: (satellite: SatelliteEntity) => void;
     private onSatelliteRemoved?: (satellite: SatelliteEntity) => void;
@@ -41,6 +48,8 @@ export class EntityManager {
             autoCleanup: true,
             updateInterval: 1000, // 1 second
             useInstancedMesh: true, // Default to instanced mesh
+            useGPURendering: false, // Default to false, enable for high performance
+            enableOcclusionCulling: false, // Default to enabled
             ...options,
         };
     }
@@ -159,7 +168,10 @@ export class EntityManager {
     private updateInstancedMesh(): void {
         const satellites = this.getAllSatellites();
 
-        if (this.options.useInstancedMesh) {
+        if (this.options.useGPURendering && this.gpuSystem) {
+            // Use GPU rendering system
+            this.gpuSystem.updateSatellites(satellites, this.currentTime);
+        } else if (this.options.useInstancedMesh) {
             // Use instanced mesh system
             this.updateInstancedMeshSystem(satellites);
         } else {
@@ -242,7 +254,7 @@ export class EntityManager {
             const distanceFromOrigin = position.length();
             const globeRadius = 1.0; // Globe radius in our coordinate system
 
-            if (distanceFromOrigin < globeRadius) {
+            if (this.options.enableOcclusionCulling && distanceFromOrigin < globeRadius) {
                 // Satellite is behind/inside the globe, hide it
                 translateArray[i3 + 0] = 10000;
                 translateArray[i3 + 1] = 10000;
@@ -644,9 +656,74 @@ export class EntityManager {
         }
     }
 
+    public setOcclusionCulling(enabled: boolean): void {
+        this.options.enableOcclusionCulling = enabled;
+        if (this.gpuSystem) {
+            this.gpuSystem.setOcclusionCulling(enabled);
+        }
+    }
+
+    public getOcclusionCulling(): boolean {
+        return this.options.enableOcclusionCulling;
+    }
+
+    public setRenderer(renderer: THREE.WebGLRenderer): void {
+        this.renderer = renderer;
+        this.initializeGPUSystem();
+    }
+
+    public setUseGPURendering(useGPU: boolean): void {
+        this.options.useGPURendering = useGPU;
+        if (useGPU && this.renderer) {
+            this.initializeGPUSystem();
+        } else if (!useGPU && this.gpuSystem) {
+            this.cleanupGPUSystem();
+        }
+    }
+
+    public getUseGPURendering(): boolean {
+        return this.options.useGPURendering;
+    }
+
+    private initializeGPUSystem(): void {
+        if (!this.renderer || !this.options.useGPURendering) return;
+
+        this.cleanupGPUSystem();
+
+        try {
+            const gpuOptions: GPUSatelliteSystemOptions = {
+                maxSatellites: this.options.maxSatellites,
+                textureSize: Math.ceil(Math.sqrt(this.options.maxSatellites)),
+                enableOcclusionCulling: this.options.enableOcclusionCulling
+            };
+
+            this.gpuSystem = new GPUSatelliteSystem(this.renderer, this.scene, gpuOptions);
+
+            // Check if GPU system initialized properly
+            if (!this.gpuSystem) {
+                console.warn('GPU system failed to initialize, falling back to CPU rendering');
+                this.options.useGPURendering = false;
+            }
+        } catch (error) {
+            console.error('Failed to initialize GPU system:', error);
+            this.options.useGPURendering = false;
+            this.gpuSystem = null;
+        }
+    }
+
+    private cleanupGPUSystem(): void {
+        if (this.gpuSystem) {
+            this.gpuSystem.dispose();
+            this.gpuSystem = null;
+        }
+    }
+
     public dispose(): void {
         this.clearAll();
         this.satellites.clear();
+
+        // Clean up GPU system
+        this.cleanupGPUSystem();
 
         // Clean up instanced mesh
         if (this.instancedMesh) {
