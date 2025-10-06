@@ -43,6 +43,9 @@ export class EntityManager {
     private onSatelliteRemoved?: (satellite: SatelliteEntity) => void;
     private onUpdate?: (satellites: SatelliteEntity[]) => void;
 
+    private lastSatelliteCount: number = 0;
+    private tempColor: THREE.Color = new THREE.Color(); // Reuse color object
+
     constructor(scene: THREE.Scene, options: EntityManagerOptions = {}) {
         this.scene = scene;
         this.options = {
@@ -202,7 +205,7 @@ export class EntityManager {
     }
 
     public update(time: Date): void {
-        if (this.isUpdating) return;
+        if (this.isUpdating || !this.meshUpdatesEnabled) return;
 
         this.isUpdating = true;
         this.currentTime = time;
@@ -305,54 +308,62 @@ export class EntityManager {
         const translateArray = translateAttribute.array as Float32Array;
         const colorArray = colorAttribute.array as Float32Array;
 
-        // Update positions and colors for active satellites
+        // Only update positions and colors for active satellites
         satellites.forEach((satellite, index) => {
             const position = satellite.getPositionDirect();
-            const satelliteColor = satellite.getColor();
-            const color = new THREE.Color(satelliteColor);
-
             const i3 = index * 3;
 
-            // Check if satellite is behind the globe (occlusion culling)
             const distanceFromOrigin = position.length();
-            const globeRadius = 1.0; // Globe radius in our coordinate system
+            const globeRadius = 1.0;
 
             if (this.options.enableOcclusionCulling && distanceFromOrigin < globeRadius) {
-                // Satellite is behind/inside the globe, hide it
                 translateArray[i3 + 0] = 10000;
                 translateArray[i3 + 1] = 10000;
                 translateArray[i3 + 2] = 10000;
-
-                // Set color to transparent
                 colorArray[i3 + 0] = 0;
                 colorArray[i3 + 1] = 0;
                 colorArray[i3 + 2] = 0;
             } else {
-                // Satellite is visible, update position and color
                 translateArray[i3 + 0] = position.x;
                 translateArray[i3 + 1] = position.y;
                 translateArray[i3 + 2] = position.z;
 
-                colorArray[i3 + 0] = color.r;
-                colorArray[i3 + 1] = color.g;
-                colorArray[i3 + 2] = color.b;
+                this.tempColor.setHex(satellite.getColor());
+                colorArray[i3 + 0] = this.tempColor.r;
+                colorArray[i3 + 1] = this.tempColor.g;
+                colorArray[i3 + 2] = this.tempColor.b;
             }
         });
 
-        // Hide unused instances by moving them far away
-        for (let i = satellites.length; i < this.options.maxSatellites; i++) {
-            const i3 = i * 3;
-            translateArray[i3 + 0] = 10000;
-            translateArray[i3 + 1] = 10000;
-            translateArray[i3 + 2] = 10000;
-
-            // Set unused colors to black
-            colorArray[i3 + 0] = 0;
-            colorArray[i3 + 1] = 0;
-            colorArray[i3 + 2] = 0;
+        // Only hide newly unused instances when count decreases
+        if (satellites.length < this.lastSatelliteCount) {
+            for (let i = satellites.length; i < this.lastSatelliteCount; i++) {
+                const i3 = i * 3;
+                translateArray[i3 + 0] = 10000;
+                translateArray[i3 + 1] = 10000;
+                translateArray[i3 + 2] = 10000;
+                colorArray[i3 + 0] = 0;
+                colorArray[i3 + 1] = 0;
+                colorArray[i3 + 2] = 0;
+            }
         }
 
-        // Mark attributes as needing update
+        // Only update the range that changed
+        if (satellites.length > 0 || this.lastSatelliteCount > 0) {
+            const updateCount = Math.max(satellites.length, this.lastSatelliteCount);
+
+            translateAttribute.updateRanges = [{
+                start: 0,
+                count: updateCount * 3
+            }];
+            colorAttribute.updateRanges = [{
+                start: 0,
+                count: updateCount * 3
+            }];
+        }
+
+        this.lastSatelliteCount = satellites.length;
+
         translateAttribute.needsUpdate = true;
         colorAttribute.needsUpdate = true;
     }
@@ -394,12 +405,22 @@ export class EntityManager {
         this.satelliteGeometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
         this.satelliteGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
 
-        // Create translate array for instance positions
+        // Create translate array for instance positions - initialize ALL to hidden
         const translateArray = new Float32Array(this.options.maxSatellites * 3);
-        this.satelliteGeometry.setAttribute('translate', new THREE.InstancedBufferAttribute(translateArray, 3));
-
-        // Create color array for instance colors
         const colorArray = new Float32Array(this.options.maxSatellites * 3);
+
+        // Initialize all instances to hidden position (do this ONCE)
+        for (let i = 0; i < this.options.maxSatellites; i++) {
+            const i3 = i * 3;
+            translateArray[i3 + 0] = 10000;
+            translateArray[i3 + 1] = 10000;
+            translateArray[i3 + 2] = 10000;
+            colorArray[i3 + 0] = 0;
+            colorArray[i3 + 1] = 0;
+            colorArray[i3 + 2] = 0;
+        }
+
+        this.satelliteGeometry.setAttribute('translate', new THREE.InstancedBufferAttribute(translateArray, 3));
         this.satelliteGeometry.setAttribute('color', new THREE.InstancedBufferAttribute(colorArray, 3));
 
         // Create raw shader material for billboard behavior
@@ -452,9 +473,11 @@ export class EntityManager {
         this.instancedMesh = new THREE.Mesh(this.satelliteGeometry, this.satelliteMaterial) as any;
 
         if (this.instancedMesh) {
-            console.log("Adding instanced mesh");
             this.scene.add(this.instancedMesh);
         }
+
+        // Reset lastSatelliteCount to ensure proper update
+        this.lastSatelliteCount = 0;
 
         // Update instance data for current satellites
         this.updateInstanceData(satellites);
@@ -471,30 +494,41 @@ export class EntityManager {
             this.particleMaterial?.dispose();
         }
 
-        // Create geometry with a larger buffer to accommodate dynamic satellite counts
-        // Use maxSatellites as the buffer size to avoid frequent recreations
         const maxParticles = this.options.maxSatellites;
         this.particleGeometry = new THREE.BufferGeometry();
 
-        // Initialize with maximum possible particles (all zeros initially)
+        // Initialize with maximum possible particles - all hidden
         const positions = new Float32Array(maxParticles * 3);
         const colors = new Float32Array(maxParticles * 3);
 
+        // Initialize all particles to hidden position (do this ONCE)
+        for (let i = 0; i < maxParticles; i++) {
+            const i3 = i * 3;
+            positions[i3] = 10000;
+            positions[i3 + 1] = 10000;
+            positions[i3 + 2] = 10000;
+            colors[i3] = 0;
+            colors[i3 + 1] = 0;
+            colors[i3 + 2] = 0;
+        }
+
         this.particleGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
         this.particleGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-        this.particleGeometry.computeBoundingSphere();
 
-        // Create material exactly like ParticleEngine
+        // Set a large bounding sphere to encompass all possible satellite positions
+        // This prevents frustum culling issues
+        this.particleGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 10);
+
         this.particleMaterial = new THREE.PointsMaterial({
             size: 0.01,
             vertexColors: true,
-            // transparent: true,
-            // opacity: 0.8
         });
 
-        // Create particle system
         this.particleSystem = new THREE.Points(this.particleGeometry, this.particleMaterial);
         this.scene.add(this.particleSystem);
+
+        // Reset lastSatelliteCount to ensure proper update
+        this.lastSatelliteCount = 0;
 
         // Update positions for current satellites
         this.updateParticlePositions(satellites);
@@ -506,45 +540,59 @@ export class EntityManager {
         const positionAttribute = this.particleGeometry.attributes.position as THREE.BufferAttribute;
         const colorAttribute = this.particleGeometry.attributes.color as THREE.BufferAttribute;
 
-        // Get the underlying arrays for direct manipulation
         const positions = positionAttribute.array as Float32Array;
         const colors = colorAttribute.array as Float32Array;
 
         // Update positions and colors for active satellites
         satellites.forEach((satellite, index) => {
-            // Use direct position reference for better performance
             const position = satellite.getPositionDirect();
-            const color = new THREE.Color(satellite.getColor());
+            const i3 = index * 3;
 
-            // Update positions directly in the buffer
-            positions[index * 3] = position.x;
-            positions[index * 3 + 1] = position.y;
-            positions[index * 3 + 2] = position.z;
+            positions[i3] = position.x;
+            positions[i3 + 1] = position.y;
+            positions[i3 + 2] = position.z;
 
-            // Update colors directly in the buffer
-            colors[index * 3] = color.r;
-            colors[index * 3 + 1] = color.g;
-            colors[index * 3 + 2] = color.b;
+            this.tempColor.setHex(satellite.getColor());
+            colors[i3] = this.tempColor.r;
+            colors[i3 + 1] = this.tempColor.g;
+            colors[i3 + 2] = this.tempColor.b;
         });
 
-        // Hide unused particles by setting them to a far position
-        for (let i = satellites.length; i < this.options.maxSatellites; i++) {
-            // Move unused particles far away (they won't be visible)
-            positions[i * 3] = 10000;
-            positions[i * 3 + 1] = 10000;
-            positions[i * 3 + 2] = 10000;
-
-            // Set unused particles to transparent (black with zero alpha would be better, but we'll use black)
-            colors[i * 3] = 0;
-            colors[i * 3 + 1] = 0;
-            colors[i * 3 + 2] = 0;
+        // Only hide newly unused particles when count decreases
+        if (satellites.length < this.lastSatelliteCount) {
+            for (let i = satellites.length; i < this.lastSatelliteCount; i++) {
+                const i3 = i * 3;
+                positions[i3] = 10000;
+                positions[i3 + 1] = 10000;
+                positions[i3 + 2] = 10000;
+                colors[i3] = 0;
+                colors[i3 + 1] = 0;
+                colors[i3 + 2] = 0;
+            }
         }
 
-        // Mark attributes as needing update
-        positionAttribute.needsUpdate = true;
-        colorAttribute.needsUpdate = true;
-    }
+        this.lastSatelliteCount = satellites.length;
 
+        // Only update the range that changed
+        if (satellites.length > 0) {
+            const updateCount = Math.max(satellites.length, this.lastSatelliteCount);
+
+            positionAttribute.updateRanges = [{
+                start: 0,
+                count: updateCount
+            }];
+            colorAttribute.updateRanges = [{
+                start: 0,
+                count: updateCount
+            }];
+
+            positionAttribute.needsUpdate = true;
+            colorAttribute.needsUpdate = true;
+        }
+
+        // DO NOT call computeBoundingSphere() here - it's too expensive!
+        // The bounding sphere is already set to encompass all possible positions
+    }
     public setTime(time: Date): void {
         this.currentTime = time;
         this.update(time);
