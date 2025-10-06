@@ -13,7 +13,7 @@ const {
     Entity,
     SampledPositionProperty,
     JulianDate,
-    Math: CesiumMath
+    Math: CesiumMath,
 } = OrbPro;
 
 // Function to detect if the user is on a mobile browser
@@ -39,10 +39,7 @@ function generateOrbitalPosition(time, semiMajorAxis, eccentricity, inclination,
     }
 
     // Calculate true anomaly
-    const trueAnomaly = 2 * Math.atan2(
-        Math.sqrt(1 + eccentricity) * Math.sin(eccentricAnomaly / 2),
-        Math.sqrt(1 - eccentricity) * Math.cos(eccentricAnomaly / 2)
-    );
+    const trueAnomaly = 2 * Math.atan2(Math.sqrt(1 + eccentricity) * Math.sin(eccentricAnomaly / 2), Math.sqrt(1 - eccentricity) * Math.cos(eccentricAnomaly / 2));
 
     // Calculate distance from Earth center
     const r = semiMajorAxis * (1 - eccentricity * Math.cos(eccentricAnomaly));
@@ -59,11 +56,9 @@ function generateOrbitalPosition(time, semiMajorAxis, eccentricity, inclination,
     const cosArg = Math.cos(argOfPeriapsis);
     const sinArg = Math.sin(argOfPeriapsis);
 
-    const x = (cosRaan * cosArg - sinRaan * sinArg * cosI) * xOrbital +
-        (-cosRaan * sinArg - sinRaan * cosArg * cosI) * yOrbital;
-    const y = (sinRaan * cosArg + cosRaan * sinArg * cosI) * xOrbital +
-        (-sinRaan * sinArg + cosRaan * cosArg * cosI) * yOrbital;
-    const z = (sinArg * sinI) * xOrbital + (cosArg * sinI) * yOrbital;
+    const x = (cosRaan * cosArg - sinRaan * sinArg * cosI) * xOrbital + (-cosRaan * sinArg - sinRaan * cosArg * cosI) * yOrbital;
+    const y = (sinRaan * cosArg + cosRaan * sinArg * cosI) * xOrbital + (-sinRaan * sinArg + cosRaan * cosArg * cosI) * yOrbital;
+    const z = sinArg * sinI * xOrbital + cosArg * sinI * yOrbital;
 
     return new Cartesian3(x, y, z);
 }
@@ -72,7 +67,7 @@ window.onload = async () => {
     // Create the Cesium Viewer in the specified container
     const viewer = new Viewer("cesiumContainer", {
         timeline: false,
-        timelineContainer: true
+        timelineContainer: true,
     });
     const timeline = new DynamicTimeline(viewer.timeline.container, viewer);
 
@@ -82,7 +77,7 @@ window.onload = async () => {
     const startTime = JulianDate.fromDate(new Date());
     const stopTime = JulianDate.addSeconds(startTime, 86400, new JulianDate()); // 24 hours
 
-    for (let i = 0; i < 1000; i++) {
+    for (let i = 0; i < 12800; i++) {
         // Generate random orbital elements
         const semiMajorAxis = 6371000 + Math.random() * 30000000 + 500000; // 500km to ~30,000km altitude
         const eccentricity = Math.random() * 0.3; // 0 to 0.3 (mostly circular to slightly elliptical)
@@ -98,36 +93,25 @@ window.onload = async () => {
         for (let j = 0; j < 100; j++) {
             const timeOffset = (j / 100) * 86400; // Over 24 hours
             const time = JulianDate.addSeconds(startTime, timeOffset, new JulianDate());
-            const position = generateOrbitalPosition(
-                time,
-                semiMajorAxis,
-                eccentricity,
-                inclination,
-                argOfPeriapsis,
-                raan,
-                meanAnomalyAtEpoch,
-                timeOffset
-            );
+            const position = generateOrbitalPosition(time, semiMajorAxis, eccentricity, inclination, argOfPeriapsis, raan, meanAnomalyAtEpoch, timeOffset);
             positionProperty.addSample(time, position);
         }
 
         const entity = new Entity({
             id: `entity-${i}`,
             name: `Entity ${i}`,
-            availability: new OrbPro.TimeIntervalCollection([
-                new OrbPro.TimeInterval({ start: startTime, stop: stopTime })
-            ]),
+            availability: new OrbPro.TimeIntervalCollection([new OrbPro.TimeInterval({ start: startTime, stop: stopTime })]),
             position: positionProperty,
             point: {
                 pixelSize: 10,
-                color: Color.WHITE
+                color: Color.WHITE,
             },
-            path: {
-                resolution: 120,
-                material: Color.WHITE.withAlpha(0.3),
-                width: 1
-            },
-            viewFrom: new Cartesian3(-1678500.7493507154, -17680994.63403464, 24667690.486357275)
+            // path: {
+            //     resolution: 120,
+            //     material: Color.WHITE.withAlpha(0.3),
+            //     width: 1
+            // },
+            viewFrom: new Cartesian3(-1678500.7493507154, -17680994.63403464, 24667690.486357275),
         });
 
         if (isMobileBrowser() && i % 10000 === 0) {
@@ -146,4 +130,4 @@ window.onload = async () => {
     viewer.scene.globe.enableLighting = true;
     viewer.scene.debugShowFramesPerSecond = true;
     globalThis.viewer = viewer; //Open console to debug app
-}
+};

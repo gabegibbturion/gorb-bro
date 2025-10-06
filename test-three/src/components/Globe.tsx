@@ -135,14 +135,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         const colors = [0xffff00, 0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xff8800, 0x8800ff, 0x00ff88, 0xff0088];
 
         // Use batch loading for much better performance
-        engineRef.current.addRandomTLEFromCOEBatch(
-            satelliteCountInput,
-            'Random-Sat',
-            [400, 800],
-            colors
-        );
+        engineRef.current.addRandomTLEFromCOEBatch(satelliteCountInput, "Random-Sat", [400, 800], colors);
     };
-
 
     const clearAllSatellites = () => {
         if (!engineRef.current) return;
@@ -169,7 +163,6 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         }
     };
 
-
     const toggleOrbits = () => {
         if (!engineRef.current) return;
 
@@ -189,12 +182,12 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             // Load the TLE file from assets - try multiple possible paths
             let response;
             try {
-                response = await fetch('/src/assets/gp.txt');
+                response = await fetch("/src/assets/gp.txt");
             } catch {
                 try {
-                    response = await fetch('/assets/gp.txt');
+                    response = await fetch("/assets/gp.txt");
                 } catch {
-                    response = await fetch('./src/assets/gp.txt');
+                    response = await fetch("./src/assets/gp.txt");
                 }
             }
 
@@ -211,8 +204,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             const satellites = engineRef.current.loadTLEFromFile(content, maxCount);
             console.log(`Loaded ${satellites.length} satellites from TLE file`);
         } catch (error) {
-            console.error('Failed to load TLE file:', error);
-            alert('Failed to load TLE file. Please check that gp.txt exists in the assets folder.');
+            console.error("Failed to load TLE file:", error);
+            alert("Failed to load TLE file. Please check that gp.txt exists in the assets folder.");
         } finally {
             setTleLoading(false);
         }
@@ -249,7 +242,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         // Show WebGPU support info
         const supportInfo = engineRef.current.getEntityManager().getWebGPUSupportInfo();
         if (!supportInfo.supported) {
-            console.warn('WebGPU not supported:', supportInfo.reason);
+            console.warn("WebGPU not supported:", supportInfo.reason);
         }
     };
 
@@ -320,9 +313,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 </div>
                 <div>System: {useWebGPURendering ? "WebGPU Rendering" : useInstancedMesh ? "Instanced Mesh" : "Particle System"}</div>
                 {useWebGPURendering && (
-                    <div style={{ fontSize: '10px', color: '#ff9800' }}>
-                        WebGPU: {engineRef.current?.getSystemInfo().webgpuReady ? "Ready" : "Not Available"}
-                    </div>
+                    <div style={{ fontSize: "10px", color: "#ff9800" }}>WebGPU: {engineRef.current?.getSystemInfo().webgpuReady ? "Ready" : "Not Available"}</div>
                 )}
                 <div>Occlusion: {occlusionCulling ? "Enabled" : "Disabled"}</div>
                 <div>Globe: {globeVisible ? "Visible" : "Hidden"}</div>
@@ -342,7 +333,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             color: "white",
                             border: "none",
                             borderRadius: "3px",
-                            cursor: tleLoading ? "not-allowed" : "pointer"
+                            cursor: tleLoading ? "not-allowed" : "pointer",
                         }}
                     >
                         {tleLoading ? "Loading..." : "Load First 1000 TLEs"}
@@ -358,7 +349,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             color: "white",
                             border: "none",
                             borderRadius: "3px",
-                            cursor: tleLoading ? "not-allowed" : "pointer"
+                            cursor: tleLoading ? "not-allowed" : "pointer",
                         }}
                     >
                         {tleLoading ? "Loading..." : "Load All TLEs"}
@@ -401,34 +392,19 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     >
                         {useInstancedMesh ? "Use Particle System" : "Use Instanced Mesh"}
                     </button>
-                    <button
-                        onClick={toggleOcclusionCulling}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: occlusionCulling ? "#4CAF50" : "#666" }}
-                    >
+                    <button onClick={toggleOcclusionCulling} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: occlusionCulling ? "#4CAF50" : "#666" }}>
                         {occlusionCulling ? "Disable Occlusion" : "Enable Occlusion"}
                     </button>
-                    <button
-                        onClick={toggleGlobeVisibility}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: globeVisible ? "#4CAF50" : "#666" }}
-                    >
+                    <button onClick={toggleGlobeVisibility} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: globeVisible ? "#4CAF50" : "#666" }}>
                         {globeVisible ? "Hide Globe" : "Show Globe"}
                     </button>
-                    <button
-                        onClick={toggleGPURendering}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: useWebGPURendering ? "#4CAF50" : "#2196F3" }}
-                    >
+                    <button onClick={toggleGPURendering} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: useWebGPURendering ? "#4CAF50" : "#2196F3" }}>
                         {useWebGPURendering ? "Disable WebGPU" : "Enable WebGPU"}
                     </button>
-                    <button
-                        onClick={toggleClouds}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: cloudsVisible ? "#4CAF50" : "#666" }}
-                    >
+                    <button onClick={toggleClouds} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: cloudsVisible ? "#4CAF50" : "#666" }}>
                         {cloudsVisible ? "Hide Clouds" : "Show Clouds"}
                     </button>
-                    <button
-                        onClick={toggleAtmosphere}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: atmosphereVisible ? "#4CAF50" : "#666" }}
-                    >
+                    <button onClick={toggleAtmosphere} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: atmosphereVisible ? "#4CAF50" : "#666" }}>
                         {atmosphereVisible ? "Hide Atmosphere" : "Show Atmosphere"}
                     </button>
                 </div>
@@ -446,7 +422,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             color: "white",
                             border: "none",
                             borderRadius: "3px",
-                            cursor: "pointer"
+                            cursor: "pointer",
                         }}
                     >
                         {meshUpdatesEnabled ? "Disable Mesh Updates" : "Enable Mesh Updates"}
@@ -462,14 +438,12 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             color: "white",
                             border: "none",
                             borderRadius: "3px",
-                            cursor: meshUpdatesEnabled ? "not-allowed" : "pointer"
+                            cursor: meshUpdatesEnabled ? "not-allowed" : "pointer",
                         }}
                     >
                         Update Mesh Now
                     </button>
-                    <div style={{ fontSize: "9px", color: "#888", marginTop: "5px" }}>
-                        Tip: Disable mesh updates before adding many satellites, then click "Update Mesh Now"
-                    </div>
+                    <div style={{ fontSize: "9px", color: "#888", marginTop: "5px" }}>Tip: Disable mesh updates before adding many satellites, then click "Update Mesh Now"</div>
                 </div>
 
                 <div style={{ marginTop: "10px" }}>

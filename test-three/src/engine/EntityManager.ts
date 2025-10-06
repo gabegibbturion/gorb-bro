@@ -105,10 +105,12 @@ export class EntityManager {
      * Add multiple satellites in batch without updating mesh each time
      * Much faster for loading large numbers of satellites
      */
-    public addSatellitesBatch(satellitesData: Array<{
-        orbitalElements: OrbitalElements;
-        options?: Partial<SatelliteEntityOptions>;
-    }>): SatelliteEntity[] {
+    public addSatellitesBatch(
+        satellitesData: Array<{
+            orbitalElements: OrbitalElements;
+            options?: Partial<SatelliteEntityOptions>;
+        }>
+    ): SatelliteEntity[] {
         const addedSatellites: SatelliteEntity[] = [];
 
         console.log(`Starting batch add of ${satellitesData.length} satellites...`);
@@ -227,11 +229,6 @@ export class EntityManager {
     }
 
     private updateInstancedMesh(): void {
-        // Skip mesh updates if disabled
-        if (!this.meshUpdatesEnabled) {
-            return;
-        }
-
         const satellites = this.getAllSatellites();
 
         if (this.options.useWebGPURendering && this.webgpuRenderer) {
@@ -352,14 +349,18 @@ export class EntityManager {
         if (satellites.length > 0 || this.lastSatelliteCount > 0) {
             const updateCount = Math.max(satellites.length, this.lastSatelliteCount);
 
-            translateAttribute.updateRanges = [{
-                start: 0,
-                count: updateCount * 3
-            }];
-            colorAttribute.updateRanges = [{
-                start: 0,
-                count: updateCount * 3
-            }];
+            translateAttribute.updateRanges = [
+                {
+                    start: 0,
+                    count: updateCount * 3,
+                },
+            ];
+            colorAttribute.updateRanges = [
+                {
+                    start: 0,
+                    count: updateCount * 3,
+                },
+            ];
         }
 
         this.lastSatelliteCount = satellites.length;
@@ -383,26 +384,42 @@ export class EntityManager {
 
         // Create a simple quad (two triangles)
         const positions = new Float32Array([
-            -0.5, -0.5, 0,  // bottom left
-            0.5, -0.5, 0,  // bottom right
-            0.5, 0.5, 0,  // top right
-            -0.5, 0.5, 0   // top left
+            -0.5,
+            -0.5,
+            0, // bottom left
+            0.5,
+            -0.5,
+            0, // bottom right
+            0.5,
+            0.5,
+            0, // top right
+            -0.5,
+            0.5,
+            0, // top left
         ]);
 
         const uvs = new Float32Array([
-            0, 0,  // bottom left
-            1, 0,  // bottom right
-            1, 1,  // top right
-            0, 1   // top left
+            0,
+            0, // bottom left
+            1,
+            0, // bottom right
+            1,
+            1, // top right
+            0,
+            1, // top left
         ]);
 
         const indices = new Uint16Array([
-            0, 1, 2,  // first triangle
-            0, 2, 3   // second triangle
+            0,
+            1,
+            2, // first triangle
+            0,
+            2,
+            3, // second triangle
         ]);
 
-        this.satelliteGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        this.satelliteGeometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        this.satelliteGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        this.satelliteGeometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
         this.satelliteGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
 
         // Create translate array for instance positions - initialize ALL to hidden
@@ -420,13 +437,13 @@ export class EntityManager {
             colorArray[i3 + 2] = 0;
         }
 
-        this.satelliteGeometry.setAttribute('translate', new THREE.InstancedBufferAttribute(translateArray, 3));
-        this.satelliteGeometry.setAttribute('color', new THREE.InstancedBufferAttribute(colorArray, 3));
+        this.satelliteGeometry.setAttribute("translate", new THREE.InstancedBufferAttribute(translateArray, 3));
+        this.satelliteGeometry.setAttribute("color", new THREE.InstancedBufferAttribute(colorArray, 3));
 
         // Create raw shader material for billboard behavior
         this.satelliteMaterial = new THREE.RawShaderMaterial({
             uniforms: {
-                time: { value: 0.0 }
+                time: { value: 0.0 },
             },
             vertexShader: `
                 precision highp float;
@@ -466,7 +483,7 @@ export class EntityManager {
                 }
             `,
             depthTest: true,
-            depthWrite: true
+            depthWrite: true,
         });
 
         // Create mesh instead of instanced mesh for raw shader
@@ -577,14 +594,18 @@ export class EntityManager {
         if (satellites.length > 0) {
             const updateCount = Math.max(satellites.length, this.lastSatelliteCount);
 
-            positionAttribute.updateRanges = [{
-                start: 0,
-                count: updateCount
-            }];
-            colorAttribute.updateRanges = [{
-                start: 0,
-                count: updateCount
-            }];
+            positionAttribute.updateRanges = [
+                {
+                    start: 0,
+                    count: updateCount,
+                },
+            ];
+            colorAttribute.updateRanges = [
+                {
+                    start: 0,
+                    count: updateCount,
+                },
+            ];
 
             positionAttribute.needsUpdate = true;
             colorAttribute.needsUpdate = true;
@@ -674,12 +695,7 @@ export class EntityManager {
     /**
      * Add multiple random satellites in batch (much faster)
      */
-    public addRandomTLEFromCOEBatch(
-        count: number,
-        namePrefix?: string,
-        altitudeRange: [number, number] = [400, 800],
-        colors?: number[]
-    ): SatelliteEntity[] {
+    public addRandomTLEFromCOEBatch(count: number, namePrefix?: string, altitudeRange: [number, number] = [400, 800], colors?: number[]): SatelliteEntity[] {
         console.log(`Generating ${count} random satellites...`);
         const startTime = performance.now();
 
@@ -703,7 +719,7 @@ export class EntityManager {
                     trailColor: color,
                     showOrbit: false,
                     orbitColor: color,
-                }
+                },
             });
         }
 
@@ -779,11 +795,12 @@ export class EntityManager {
         return {
             satelliteCount: this.currentSatelliteCount,
             maxSatellites: this.options.maxSatellites,
-            isOptimized: this.options.useWebGPURendering ?
-                (this.webgpuRenderer !== null && this.webgpuRenderer.isReady()) :
-                (this.options.useInstancedMesh ? this.instancedMesh !== null : this.particleSystem !== null),
-            systemType: this.options.useWebGPURendering ? "webgpu" :
-                (this.options.useInstancedMesh ? "instanced" : "particle"),
+            isOptimized: this.options.useWebGPURendering
+                ? this.webgpuRenderer !== null && this.webgpuRenderer.isReady()
+                : this.options.useInstancedMesh
+                ? this.instancedMesh !== null
+                : this.particleSystem !== null,
+            systemType: this.options.useWebGPURendering ? "webgpu" : this.options.useInstancedMesh ? "instanced" : "particle",
             webgpuReady: this.webgpuRenderer ? this.webgpuRenderer.isReady() : false,
         };
     }
@@ -875,7 +892,7 @@ export class EntityManager {
      */
     public setMeshUpdatesEnabled(enabled: boolean): void {
         this.meshUpdatesEnabled = enabled;
-        console.log(`Mesh updates ${enabled ? 'enabled' : 'disabled'}`);
+        console.log(`Mesh updates ${enabled ? "enabled" : "disabled"}`);
     }
 
     /**
@@ -888,10 +905,15 @@ export class EntityManager {
     /**
      * Manually trigger a mesh update
      * Useful after adding many satellites with mesh updates disabled
+     * This performs a one-time update without enabling automatic updates
      */
     public forceUpdateMesh(): void {
-        console.log('Forcing mesh update...');
+        console.log("Forcing mesh update...");
         const satellites = this.getAllSatellites();
+
+        // Temporarily enable mesh updates for this single update
+        const wasMeshUpdatesEnabled = this.meshUpdatesEnabled;
+        this.meshUpdatesEnabled = true;
 
         if (this.options.useWebGPURendering && this.webgpuRenderer) {
             this.webgpuRenderer.updateSatellites(satellites, this.currentTime);
@@ -900,37 +922,42 @@ export class EntityManager {
         } else {
             this.updateParticleSystem(satellites);
         }
-        console.log(`Mesh updated with ${satellites.length} satellites`);
+
+        this.update(this.currentTime);
+        // Restore the original mesh updates setting
+        this.meshUpdatesEnabled = wasMeshUpdatesEnabled;
+
+        console.log(`Mesh updated with ${satellites.length} satellites (mesh updates remain ${wasMeshUpdatesEnabled ? "enabled" : "disabled"})`);
     }
 
     public static isWebGPUSupported(): boolean {
-        return typeof navigator !== 'undefined' && 'gpu' in navigator;
+        return typeof navigator !== "undefined" && "gpu" in navigator;
     }
 
     public getWebGPUSupportInfo(): {
         supported: boolean;
         reason?: string;
-        fallbackSystem: 'instanced' | 'particle';
+        fallbackSystem: "instanced" | "particle";
     } {
         if (!EntityManager.isWebGPUSupported()) {
             return {
                 supported: false,
-                reason: 'WebGPU not supported in this browser',
-                fallbackSystem: this.options.useInstancedMesh ? 'instanced' : 'particle'
+                reason: "WebGPU not supported in this browser",
+                fallbackSystem: this.options.useInstancedMesh ? "instanced" : "particle",
             };
         }
 
         if (this.webgpuRenderer && this.webgpuRenderer.isReady()) {
             return {
                 supported: true,
-                fallbackSystem: this.options.useInstancedMesh ? 'instanced' : 'particle'
+                fallbackSystem: this.options.useInstancedMesh ? "instanced" : "particle",
             };
         }
 
         return {
             supported: false,
-            reason: 'WebGPU adapter not available (try enabling experimental features)',
-            fallbackSystem: this.options.useInstancedMesh ? 'instanced' : 'particle'
+            reason: "WebGPU adapter not available (try enabling experimental features)",
+            fallbackSystem: this.options.useInstancedMesh ? "instanced" : "particle",
         };
     }
 
@@ -944,23 +971,23 @@ export class EntityManager {
                 maxSatellites: this.options.maxSatellites,
                 enableOcclusionCulling: this.options.enableOcclusionCulling,
                 particleSize: this.options.particleSize,
-                useInstancedRendering: true
+                useInstancedRendering: true,
             };
 
             this.webgpuRenderer = new WebGPUSatelliteRenderer(this.renderer, this.scene, webgpuOptions);
 
             // Check if WebGPU system initialized properly
             if (!this.webgpuRenderer || !this.webgpuRenderer.isReady()) {
-                console.warn('WebGPU system failed to initialize, falling back to instanced mesh rendering');
+                console.warn("WebGPU system failed to initialize, falling back to instanced mesh rendering");
                 this.options.useWebGPURendering = false;
                 this.options.useInstancedMesh = true; // Fallback to instanced mesh
                 this.webgpuRenderer = null;
             } else {
-                console.log('WebGPU system initialized successfully');
+                console.log("WebGPU system initialized successfully");
             }
         } catch (error) {
-            console.error('Failed to initialize WebGPU system:', error);
-            console.log('Falling back to instanced mesh rendering');
+            console.error("Failed to initialize WebGPU system:", error);
+            console.log("Falling back to instanced mesh rendering");
             this.options.useWebGPURendering = false;
             this.options.useInstancedMesh = true; // Fallback to instanced mesh
             this.webgpuRenderer = null;
