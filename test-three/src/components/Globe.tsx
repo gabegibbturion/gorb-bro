@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
+import type { RenderingSystem } from "../engine/EntityManager";
 import { GlobeEngine, GlobeType } from "../engine/GlobeEngine";
 import type { ClassicalOrbitalElements } from "../engine/OrbitalElements";
 import { OrbitalElementsGenerator } from "../engine/OrbitalElements";
-import type { RenderingSystem } from "../engine/EntityManager";
 import type { OrbitRenderingSystem } from "../engine/OrbitManager";
 
 interface GlobeProps {
@@ -32,8 +32,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [isPaused, setIsPaused] = useState(false);
     const [timeMultiplier, setTimeMultiplier] = useState(1);
     const [satelliteCountInput, setSatelliteCountInput] = useState<any>(100);
-    const [, setSelectedEntity] = useState<any>(null);
-    const [, setShowSidePanel] = useState(false);
+    const [selectedEntity, setSelectedEntity] = useState<any>(null);
+    const [showSidePanel, setShowSidePanel] = useState(false);
     const [renderingSystem, setRenderingSystem] = useState<RenderingSystem>("instanced");
     const [tleLoading, setTleLoading] = useState(false);
     const [occlusionCulling, setOcclusionCulling] = useState(true);
@@ -237,6 +237,75 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         loadTLEFile(0); // 0 means load all
     };
 
+    const loadFromTurionAPI = async () => {
+        if (!engineRef.current) return;
+
+        setTleLoading(true);
+        try {
+            let allTLEData: Array<{ tle_line1: string; tle_line2: string }> = [];
+            let page = 1;
+            const perPage = 10000;
+            let hasMore = true;
+
+            console.log("Starting to fetch from Turion Space API...");
+
+            // Keep fetching until we get all data
+            while (hasMore) {
+                const url = `https://rsodata.turionspace.com/api/v3/rsodata/current?per_page=${perPage}&page=${page}`;
+                console.log(`Fetching page ${page}...`);
+
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch from API: ${response.status}`);
+                }
+
+                const jsonData = await response.json();
+                const pageData = jsonData.data || [];
+
+                console.log(`Page ${page}: Received ${pageData.length} satellites (Total available: ${jsonData.total || 'unknown'})`);
+
+                allTLEData = allTLEData.concat(pageData);
+
+                // Check if we should continue fetching
+                if (pageData.length < perPage) {
+                    hasMore = false;
+                    console.log(`Received fewer than ${perPage} items, stopping pagination`);
+                } else {
+                    page++;
+                }
+            }
+
+            console.log(`Total satellites fetched: ${allTLEData.length}`);
+
+            // Convert JSON format to TLE text format
+            // TLE format: 3 lines per satellite (name, line1, line2)
+            const tleLines: string[] = [];
+            allTLEData.forEach((item, index) => {
+                if (item.tle_line1 && item.tle_line2) {
+                    // Extract satellite name from TLE line 1 or use a default
+                    const satName = `RSO-${index + 1}`;
+                    tleLines.push(satName);
+                    tleLines.push(item.tle_line1);
+                    tleLines.push(item.tle_line2);
+                }
+            });
+
+            const tleContent = tleLines.join('\n');
+
+            // Clear existing satellites first
+            clearAllSatellites();
+
+            // Load TLEs into the globe
+            const satellites = engineRef.current.loadTLEFromFile(tleContent, 0);
+            console.log(`Successfully loaded ${satellites.length} satellites from Turion Space API`);
+        } catch (error) {
+            console.error("Failed to load from Turion Space API:", error);
+            alert(`Failed to load from Turion Space API: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } finally {
+            setTleLoading(false);
+        }
+    };
+
     const toggleOcclusionCulling = () => {
         if (!engineRef.current) return;
         const newValue = !occlusionCulling;
@@ -399,7 +468,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     };
 
     return (
-        <div style={{ position: "relative", width: "100%", height: "100%", ...style }} className={className}>
+        <div style={{ position: "relative", width: "100%", height: "100%", fontSize: "15px", ...style }} className={className}>
             {/* Globe container */}
             <div
                 ref={containerRef}
@@ -421,7 +490,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     padding: "10px",
                     borderRadius: "5px",
                     fontFamily: "monospace",
-                    fontSize: "12px",
+                    fontSize: "15px",
                     minWidth: "200px",
                 }}
             >
@@ -429,14 +498,14 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 <div>Time: {currentTime.toLocaleString()}</div>
 
                 <div style={{ marginTop: "10px" }}>
-                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>TLE File Controls:</div>
+                    <div style={{ marginBottom: "5px", fontWeight: "bold", fontSize: "15px" }}>TLE File Controls:</div>
                     <button
                         onClick={loadFirst1000TLEs}
                         disabled={tleLoading}
                         style={{
                             margin: "2px",
                             padding: "5px",
-                            fontSize: "10px",
+                            fontSize: "15px",
                             backgroundColor: tleLoading ? "#666" : "#FF9800",
                             color: "white",
                             border: "none",
@@ -452,7 +521,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                         style={{
                             margin: "2px",
                             padding: "5px",
-                            fontSize: "10px",
+                            fontSize: "15px",
                             backgroundColor: tleLoading ? "#666" : "#F44336",
                             color: "white",
                             border: "none",
@@ -462,10 +531,26 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     >
                         {tleLoading ? "Loading..." : "Load All TLEs"}
                     </button>
+                    <button
+                        onClick={loadFromTurionAPI}
+                        disabled={tleLoading}
+                        style={{
+                            margin: "2px",
+                            padding: "5px",
+                            fontSize: "15px",
+                            backgroundColor: tleLoading ? "#666" : "#2196F3",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "3px",
+                            cursor: tleLoading ? "not-allowed" : "pointer",
+                        }}
+                    >
+                        {tleLoading ? "Loading..." : "Load from Turion API"}
+                    </button>
                 </div>
 
                 <div style={{ marginTop: "10px" }}>
-                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Satellite Controls:</div>
+                    <div style={{ marginBottom: "5px", fontWeight: "bold", fontSize: "15px" }}>Satellite Controls:</div>
                     <div style={{ marginBottom: "5px", display: "flex", alignItems: "center", gap: "5px" }}>
                         <input
                             value={satelliteCountInput}
@@ -475,25 +560,25 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             style={{
                                 width: "60px",
                                 padding: "2px",
-                                fontSize: "10px",
+                                fontSize: "15px",
                                 border: "1px solid #ccc",
                                 borderRadius: "3px",
                             }}
                         />
-                        <button onClick={addMultipleSatellites} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: "#4CAF50" }}>
+                        <button onClick={addMultipleSatellites} style={{ margin: "2px", padding: "5px", fontSize: "15px", backgroundColor: "#4CAF50" }}>
                             Add {satelliteCountInput} Satellites
                         </button>
                     </div>
 
                     {/* Orbit Controls */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Orbits:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Orbits:</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px", marginBottom: "5px" }}>
                             <button
                                 onClick={toggleOrbits}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: showOrbits ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -507,7 +592,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={addOrbitsForAllSatellites}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: "#2196F3",
                                     color: "white",
                                     border: "none",
@@ -521,7 +606,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={clearAllOrbits}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: "#f44336",
                                     color: "white",
                                     border: "none",
@@ -536,7 +621,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
                     {/* Rendering System */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Rendering:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Rendering:</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px" }}>
                             {[
                                 { value: "particle", label: "Particle", description: "Basic" },
@@ -554,7 +639,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                         backgroundColor: renderingSystem === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
                                         borderRadius: "2px",
                                         border: renderingSystem === option.value ? "1px solid #4CAF50" : "1px solid transparent",
-                                        fontSize: "8px",
+                                        fontSize: "15px",
                                         transition: "all 0.2s ease",
                                     }}
                                 >
@@ -572,8 +657,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                         }}
                                         style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
                                     />
-                                    <div style={{ fontWeight: "bold", color: renderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "8px" }}>{option.label}</div>
-                                    <div style={{ fontSize: "7px", color: "#aaa" }}>{option.description}</div>
+                                    <div style={{ fontWeight: "bold", color: renderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "15px" }}>{option.label}</div>
+                                    <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
                                 </label>
                             ))}
                         </div>
@@ -581,7 +666,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
                     {/* Globe Type */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Globe Type:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Globe Type:</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px" }}>
                             {[
                                 { value: GlobeType.BASIC, label: "Basic", description: "Simple" },
@@ -599,7 +684,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                         backgroundColor: globeType === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
                                         borderRadius: "2px",
                                         border: globeType === option.value ? "1px solid #4CAF50" : "1px solid transparent",
-                                        fontSize: "8px",
+                                        fontSize: "15px",
                                         transition: "all 0.2s ease",
                                     }}
                                 >
@@ -614,8 +699,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                         }}
                                         style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
                                     />
-                                    <div style={{ fontWeight: "bold", color: globeType === option.value ? "#4CAF50" : "#fff", fontSize: "8px" }}>{option.label}</div>
-                                    <div style={{ fontSize: "7px", color: "#aaa" }}>{option.description}</div>
+                                    <div style={{ fontWeight: "bold", color: globeType === option.value ? "#4CAF50" : "#fff", fontSize: "15px" }}>{option.label}</div>
+                                    <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
                                 </label>
                             ))}
                         </div>
@@ -623,7 +708,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
                     {/* Orbit Rendering System */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Orbit System:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Orbit System:</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px" }}>
                             {[
                                 { value: "line", label: "Line", description: "Traditional" },
@@ -641,7 +726,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                         backgroundColor: orbitRenderingSystem === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
                                         borderRadius: "2px",
                                         border: orbitRenderingSystem === option.value ? "1px solid #4CAF50" : "1px solid transparent",
-                                        fontSize: "8px",
+                                        fontSize: "15px",
                                         transition: "all 0.2s ease",
                                     }}
                                 >
@@ -656,8 +741,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                         }}
                                         style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
                                     />
-                                    <div style={{ fontWeight: "bold", color: orbitRenderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "8px" }}>{option.label}</div>
-                                    <div style={{ fontSize: "7px", color: "#aaa" }}>{option.description}</div>
+                                    <div style={{ fontWeight: "bold", color: orbitRenderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "15px" }}>{option.label}</div>
+                                    <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
                                 </label>
                             ))}
                         </div>
@@ -665,11 +750,11 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
                     {/* Size Controls */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Size Controls:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Size Controls:</div>
 
                         {/* Satellite Size */}
                         <div style={{ marginBottom: "5px" }}>
-                            <div style={{ fontSize: "8px", marginBottom: "2px" }}>Satellites:</div>
+                            <div style={{ fontSize: "15px", marginBottom: "2px" }}>Satellites:</div>
                             <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                                 <input
                                     type="range"
@@ -683,13 +768,13 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                     }}
                                     style={{ flex: 1, height: "4px" }}
                                 />
-                                <span style={{ fontSize: "8px", minWidth: "30px" }}>{satelliteSize.toFixed(3)}</span>
+                                <span style={{ fontSize: "15px", minWidth: "30px" }}>{satelliteSize.toFixed(3)}</span>
                             </div>
                         </div>
 
                         {/* Orbit Size */}
                         <div style={{ marginBottom: "5px" }}>
-                            <div style={{ fontSize: "8px", marginBottom: "2px" }}>Orbits:</div>
+                            <div style={{ fontSize: "15px", marginBottom: "2px" }}>Orbits:</div>
                             <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                                 <input
                                     type="range"
@@ -703,20 +788,20 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                     }}
                                     style={{ flex: 1, height: "4px" }}
                                 />
-                                <span style={{ fontSize: "8px", minWidth: "30px" }}>{orbitSize.toFixed(1)}</span>
+                                <span style={{ fontSize: "15px", minWidth: "30px" }}>{orbitSize.toFixed(1)}</span>
                             </div>
                         </div>
                     </div>
 
                     {/* Toggle Controls */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Toggles:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Toggles:</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px" }}>
                             <button
                                 onClick={toggleOcclusionCulling}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: occlusionCulling ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -730,7 +815,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={toggleGlobeVisibility}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: globeVisible ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -744,7 +829,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={toggleClouds}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: cloudsVisible ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -758,7 +843,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={toggleAtmosphere}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: atmosphereVisible ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -773,14 +858,14 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
                     {/* Mesh Update Controls */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Mesh Updates:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Mesh Updates:</div>
                         <div style={{ display: "flex", gap: "3px", marginBottom: "3px" }}>
                             <button
                                 onClick={toggleMeshUpdates}
                                 style={{
                                     flex: 1,
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: meshUpdatesEnabled ? "#4CAF50" : "#F44336",
                                     color: "white",
                                     border: "none",
@@ -796,7 +881,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 style={{
                                     flex: 1,
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: meshUpdatesEnabled ? "#666" : "#FF9800",
                                     color: "white",
                                     border: "none",
@@ -811,7 +896,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 style={{
                                     flex: 1,
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: "#9C27B0",
                                     color: "white",
                                     border: "none",
@@ -822,19 +907,19 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 Load Tiles
                             </button>
                         </div>
-                        <div style={{ fontSize: "7px", color: "#888" }}>💡 Disable before adding many satellites</div>
+                        <div style={{ fontSize: "15px", color: "#888" }}>💡 Disable before adding many satellites</div>
                     </div>
 
                     {/* Time Controls */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Time:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Time:</div>
                         <div style={{ display: "flex", gap: "3px", marginBottom: "5px" }}>
                             <button
                                 onClick={togglePause}
                                 style={{
                                     flex: 1,
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: isPaused ? "#4CAF50" : "#f44336",
                                     color: "white",
                                     border: "none",
@@ -846,13 +931,13 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             </button>
                         </div>
 
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Speed:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Speed:</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "3px" }}>
                             <button
                                 onClick={() => handleSetTimeMultiplier(1)}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: timeMultiplier === 1 ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -866,7 +951,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={() => handleSetTimeMultiplier(10)}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: timeMultiplier === 10 ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -880,7 +965,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={() => handleSetTimeMultiplier(100)}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: timeMultiplier === 100 ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -894,7 +979,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={() => handleSetTimeMultiplier(1000)}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: timeMultiplier === 1000 ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -908,7 +993,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={() => handleSetTimeMultiplier(10000)}
                                 style={{
                                     padding: "3px 6px",
-                                    fontSize: "8px",
+                                    fontSize: "15px",
                                     backgroundColor: timeMultiplier === 10000 ? "#4CAF50" : "#666",
                                     color: "white",
                                     border: "none",
@@ -923,9 +1008,9 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
                     {/* Timeline */}
                     <div style={{ marginBottom: "8px" }}>
-                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Timeline:</div>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Timeline:</div>
                         <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "5px" }}>
-                            <div style={{ fontSize: "8px", color: "#aaa", minWidth: "60px" }}>
+                            <div style={{ fontSize: "15px", color: "#aaa", minWidth: "60px" }}>
                                 {(() => {
                                     const now = new Date();
                                     const currentTime = new Date(now.getTime() + timelineOffset * 60 * 60 * 1000);
@@ -936,7 +1021,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onClick={resetTimelineToNow}
                                 style={{
                                     padding: "2px 6px",
-                                    fontSize: "7px",
+                                    fontSize: "15px",
                                     backgroundColor: "#4CAF50",
                                     color: "white",
                                     border: "none",
@@ -979,7 +1064,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                             top: "18px",
                                             left: `${position * 100}%`,
                                             transform: "translateX(-50%)",
-                                            fontSize: "6px",
+                                            fontSize: "15px",
                                             color: hour === 0 ? "#4CAF50" : "#aaa",
                                             fontWeight: hour === 0 ? "bold" : "normal",
                                         }}
@@ -989,25 +1074,26 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 );
                             })}
                         </div>
-                        <div style={{ fontSize: "7px", color: "#888" }}>💡 Drag to scrub through time</div>
+                        <div style={{ fontSize: "15px", color: "#888" }}>💡 Drag to scrub through time</div>
                     </div>
                 </div>
 
                 {/* Satellite Locations Display - Commented out for space */}
 
                 {/* Side Panel for Selected Entity */}
-                {/* {showSidePanel && selectedEntity && (
+                {showSidePanel && selectedEntity && (
                     <div
                         style={{
                             position: "absolute",
-                            top: "10px",
-                            right: "10px",
+                            bottom: "10px",
+                            left: "50%",
+                            transform: "translateX(-50%)",
                             background: "rgba(0, 0, 0, 0.9)",
                             color: "white",
                             padding: "15px",
                             borderRadius: "8px",
                             fontFamily: "monospace",
-                            fontSize: "12px",
+                            fontSize: "15px",
                             minWidth: "300px",
                             maxWidth: "400px",
                             maxHeight: "80vh",
@@ -1017,7 +1103,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                         }}
                     >
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                            <h3 style={{ margin: 0, color: "#4CAF50" }}>Satellite Details</h3>
+                            <h3 style={{ margin: 0, color: "#4CAF50", fontSize: "15px" }}>Satellite Details</h3>
                             <button
                                 onClick={() => {
                                     if (engineRef.current) {
@@ -1031,23 +1117,23 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                     borderRadius: "3px",
                                     padding: "5px 10px",
                                     cursor: "pointer",
-                                    fontSize: "10px",
+                                    fontSize: "15px",
                                 }}
                             >
                                 ✕ Close
                             </button>
                         </div>
 
-                        <div style={{ marginBottom: "10px" }}>
+                        <div style={{ marginBottom: "10px", fontSize: "15px" }}>
                             <strong>Name:</strong> {selectedEntity.name}
                         </div>
 
-                        <div style={{ marginBottom: "10px" }}>
+                        <div style={{ marginBottom: "10px", fontSize: "15px" }}>
                             <strong>ID:</strong> {selectedEntity.id}
                         </div>
 
                         {selectedEntity.getCurrentLocation && (
-                            <div style={{ marginBottom: "10px" }}>
+                            <div style={{ marginBottom: "10px", fontSize: "15px" }}>
                                 <strong>Current Position:</strong>
                                 {(() => {
                                     try {
@@ -1056,29 +1142,29 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                             typeof location.latitude === "number" &&
                                             typeof location.longitude === "number" &&
                                             typeof location.altitude === "number" ? (
-                                            <div style={{ marginLeft: "10px", fontSize: "11px" }}>
+                                            <div style={{ marginLeft: "10px", fontSize: "15px" }}>
                                                 <div>Lat: {location.latitude.toFixed(4)}°</div>
                                                 <div>Lon: {location.longitude.toFixed(4)}°</div>
                                                 <div>Alt: {location.altitude.toFixed(2)} km</div>
                                             </div>
                                         ) : (
-                                            <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Position not available</div>
+                                            <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>Position not available</div>
                                         );
                                     } catch (error) {
-                                        return <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Error getting position</div>;
+                                        return <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>Error getting position</div>;
                                     }
                                 })()}
                             </div>
                         )}
 
                         {selectedEntity.getOrbitalElements && (
-                            <div style={{ marginBottom: "10px" }}>
+                            <div style={{ marginBottom: "10px", fontSize: "15px" }}>
                                 <strong>Orbital Elements:</strong>
                                 {(() => {
                                     try {
                                         const coe = selectedEntity.getOrbitalElements();
                                         return coe ? (
-                                            <div style={{ marginLeft: "10px", fontSize: "11px" }}>
+                                            <div style={{ marginLeft: "10px", fontSize: "15px" }}>
                                                 <div>Inclination: {coe.inclination ? ((coe.inclination * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
                                                 <div>RAAN: {coe.rightAscension ? ((coe.rightAscension * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
                                                 <div>Eccentricity: {coe.eccentricity ? coe.eccentricity.toFixed(6) : "N/A"}</div>
@@ -1087,20 +1173,20 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                                 <div>Mean motion: {coe.meanMotion ? coe.meanMotion.toFixed(8) : "N/A"} rev/day</div>
                                             </div>
                                         ) : (
-                                            <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Orbital elements not available</div>
+                                            <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>Orbital elements not available</div>
                                         );
                                     } catch (error) {
-                                        return <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Error getting orbital elements</div>;
+                                        return <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>Error getting orbital elements</div>;
                                     }
                                 })()}
                             </div>
                         )}
 
                         <div style={{ marginTop: "15px", padding: "10px", background: "rgba(76, 175, 80, 0.1)", borderRadius: "5px" }}>
-                            <div style={{ fontSize: "11px", color: "#4CAF50" }}>💡 Click anywhere on the screen to deselect</div>
+                            <div style={{ fontSize: "15px", color: "#4CAF50" }}>💡 Click anywhere on the screen to deselect</div>
                         </div>
                     </div>
-                )} */}
+                )}
             </div>
         </div>
     );

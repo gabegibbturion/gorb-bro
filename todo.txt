@@ -1,0 +1,29 @@
+MVP REQUIREMENTS:
+- 20,000 norads at 60 fps propagated
+- tile system for globe
+- ellipse generation for orbits
+- ability to select entities and center camera on them
+- high quality looking globe
+- pretty looking timelines
+- sun + moon locations + lights
+- time controls
+- tile service globe
+- ability to plug and play
+- good looking skybox
+- ability to easily add custom three js objects
+- Maneuver sims (line generation)
+
+
+NICE TO HAVES:
+- Entities with path logic (planes / boats)
+- Stars
+- Custom 3D models for entities (or 2d things like svgs or pngs)
+- Sensors
+- Child entities
+- Line of sight access
+
+Prob wont get:
+- Reference Frames
+- Is illuminated checks
+- Weather stuff
+- 
