@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { GlobeEngine } from "../engine/GlobeEngine";
+import { GlobeEngine, GlobeType } from "../engine/GlobeEngine";
 import type { ClassicalOrbitalElements } from "../engine/OrbitalElements";
 import { OrbitalElementsGenerator } from "../engine/OrbitalElements";
 import type { RenderingSystem } from "../engine/EntityManager";
@@ -42,6 +42,9 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [cloudsVisible, setCloudsVisible] = useState(true);
     const [atmosphereVisible, setAtmosphereVisible] = useState(true);
     const [meshUpdatesEnabled, setMeshUpdatesEnabled] = useState(true);
+    const [globeType, setGlobeType] = useState<GlobeType>(GlobeType.BASIC);
+    const [timelineOffset, setTimelineOffset] = useState(0); // Offset from center in hours
+    const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -55,6 +58,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             rotationSpeed: 0.0005,
             maxSatellites: 2000000,
             renderingSystem: renderingSystem,
+            globeType: globeType,
         });
 
         // Set up event handlers
@@ -89,6 +93,15 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
         engine.onTimeUpdateCallback((time) => {
             setCurrentTime(time);
+
+            // Update timeline offset if not dragging
+            if (!isDraggingTimeline && engineRef.current) {
+                const now = new Date();
+                const timeDiff = time.getTime() - now.getTime();
+                const hoursOffset = timeDiff / (1000 * 60 * 60); // Convert to hours
+                setTimelineOffset(hoursOffset);
+            }
+
             if (onTimeUpdate) {
                 onTimeUpdate(time);
             }
@@ -266,6 +279,41 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         engineRef.current.forceUpdateMesh();
     };
 
+    const handleGlobeTypeChange = (newGlobeType: GlobeType) => {
+        if (!engineRef.current) return;
+        setGlobeType(newGlobeType);
+        engineRef.current.setGlobeType(newGlobeType);
+    };
+
+    const handleTimelineChange = (value: number) => {
+        if (!engineRef.current) return;
+
+        // Convert slider value (-1 to 1) to hours offset (-24 to +24)
+        const hoursOffset = value * 24;
+        setTimelineOffset(hoursOffset);
+
+        // Calculate new time based on offset from now
+        const now = new Date();
+        const newTime = new Date(now.getTime() + hoursOffset * 60 * 60 * 1000);
+
+        engineRef.current.setTimeFromTimeline(newTime);
+    };
+
+    const resetTimelineToNow = () => {
+        if (!engineRef.current) return;
+
+        setTimelineOffset(0); // Reset to center (current time)
+        engineRef.current.resetToCurrentTime();
+    };
+
+    const handleTimelineMouseDown = () => {
+        setIsDraggingTimeline(true);
+    };
+
+    const handleTimelineMouseUp = () => {
+        setIsDraggingTimeline(false);
+    };
+
     return (
         <div style={{ position: "relative", width: "100%", height: "100%", ...style }} className={className}>
             {/* Globe container */}
@@ -300,6 +348,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     Speed: {timeMultiplier}x {isPaused ? "(Paused)" : ""}
                 </div>
                 <div>System: {renderingSystem === "satpoints" ? "SatPoints" : renderingSystem === "instanced" ? "Instanced Mesh" : "Particle System"}</div>
+                <div>Globe Type: {globeType === GlobeType.ENHANCED ? "Enhanced" : "Basic"}</div>
                 <div>Occlusion: {occlusionCulling ? "Enabled" : "Disabled"}</div>
                 <div>Globe: {globeVisible ? "Visible" : "Hidden"}</div>
                 <div>Clouds: {cloudsVisible ? "Visible" : "Hidden"}</div>
@@ -409,6 +458,48 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             ))}
                         </div>
                     </div>
+
+                    <div style={{ marginTop: "10px" }}>
+                        <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Globe Type:</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                            {[
+                                { value: GlobeType.BASIC, label: "Basic Globe", description: "Simple globe with basic textures" },
+                                { value: GlobeType.ENHANCED, label: "Enhanced Globe", description: "High-quality globe with day/night textures" },
+                            ].map((option) => (
+                                <label
+                                    key={option.value}
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        padding: "5px",
+                                        cursor: "pointer",
+                                        backgroundColor: globeType === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
+                                        borderRadius: "3px",
+                                        border: globeType === option.value ? "1px solid #4CAF50" : "1px solid transparent",
+                                        fontSize: "10px",
+                                        transition: "all 0.2s ease",
+                                    }}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="globeType"
+                                        value={option.value}
+                                        checked={globeType === option.value}
+                                        onChange={(e) => {
+                                            const newGlobeType = e.target.value as GlobeType;
+                                            handleGlobeTypeChange(newGlobeType);
+                                        }}
+                                        style={{ marginRight: "8px", accentColor: "#4CAF50" }}
+                                    />
+                                    <div>
+                                        <div style={{ fontWeight: "bold", color: globeType === option.value ? "#4CAF50" : "#fff" }}>{option.label}</div>
+                                        <div style={{ fontSize: "9px", color: "#aaa", marginTop: "1px" }}>{option.description}</div>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+
                     {renderingSystem === "satpoints" && (
                         <div style={{ marginTop: "5px", display: "flex", alignItems: "center", gap: "5px" }}>
                             <label style={{ fontSize: "10px" }}>Size:</label>
@@ -488,20 +579,98 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     </button>
                 </div>
 
-                <div style={{ marginTop: "10px" }}>
-                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Speed:</div>
-                    <button onClick={() => handleSetTimeMultiplier(1)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        1x
-                    </button>
-                    <button onClick={() => handleSetTimeMultiplier(10)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        10x
-                    </button>
-                    <button onClick={() => handleSetTimeMultiplier(100)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        100x
-                    </button>
-                    <button onClick={() => handleSetTimeMultiplier(1000)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                        1000x
-                    </button>
+                <div style={{ marginTop: "10px", display: "flex", gap: "20px" }}>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Speed:</div>
+                        <button onClick={() => handleSetTimeMultiplier(1)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
+                            1x
+                        </button>
+                        <button onClick={() => handleSetTimeMultiplier(10)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
+                            10x
+                        </button>
+                        <button onClick={() => handleSetTimeMultiplier(100)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
+                            100x
+                        </button>
+                        <button onClick={() => handleSetTimeMultiplier(1000)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
+                            1000x
+                        </button>
+                        <button onClick={() => handleSetTimeMultiplier(10000)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
+                            10000x
+                        </button>
+                    </div>
+
+                    <div style={{ flex: 2 }}>
+                        <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Timeline:</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "5px" }}>
+                            <div style={{ fontSize: "9px", color: "#aaa", minWidth: "80px" }}>
+                                {(() => {
+                                    const now = new Date();
+                                    const currentTime = new Date(now.getTime() + timelineOffset * 60 * 60 * 1000);
+                                    return currentTime.toLocaleTimeString();
+                                })()}
+                            </div>
+                            <button
+                                onClick={resetTimelineToNow}
+                                style={{
+                                    margin: "2px",
+                                    padding: "3px 8px",
+                                    fontSize: "9px",
+                                    backgroundColor: "#4CAF50",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "3px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                Reset to Now
+                            </button>
+                        </div>
+                        <div style={{ position: "relative", marginBottom: "5px", padding: "0 10px" }}>
+                            <input
+                                type="range"
+                                min="-1"
+                                max="1"
+                                step="0.01"
+                                value={timelineOffset / 24}
+                                onChange={(e) => handleTimelineChange(parseFloat(e.target.value))}
+                                onMouseDown={handleTimelineMouseDown}
+                                onMouseUp={handleTimelineMouseUp}
+                                style={{
+                                    width: "100%",
+                                    height: "20px",
+                                    background: "linear-gradient(to right, #333 0%, #4CAF50 50%, #333 100%)",
+                                    outline: "none",
+                                    borderRadius: "10px",
+                                    cursor: isDraggingTimeline ? "grabbing" : "grab",
+                                    WebkitAppearance: "none",
+                                    appearance: "none",
+                                }}
+                            />
+                            {/* Tick marks */}
+                            {[-24, -12, -6, -3, 0, 3, 6, 12, 24].map((hour) => {
+                                const position = (hour + 24) / 48; // Convert to 0-1 range
+                                const time = new Date();
+                                time.setHours(time.getHours() + hour);
+                                return (
+                                    <div
+                                        key={hour}
+                                        style={{
+                                            position: "absolute",
+                                            top: "25px",
+                                            left: `${position * 100}%`,
+                                            transform: "translateX(-50%)",
+                                            fontSize: "7px",
+                                            color: hour === 0 ? "#4CAF50" : "#aaa",
+                                            fontWeight: hour === 0 ? "bold" : "normal",
+                                        }}
+                                    >
+                                        {hour === 0 ? "Now" : `${hour > 0 ? "+" : ""}${hour}h`}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div style={{ fontSize: "9px", color: "#888", marginTop: "5px" }}>💡 Drag anywhere on the timeline to scrub through time</div>
+                    </div>
                 </div>
             </div>
 
@@ -639,31 +808,6 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     </div>
                 </div>
             )}
-
-            {/* Instructions */}
-            <div
-                style={{
-                    position: "absolute",
-                    bottom: "10px",
-                    left: "10px",
-                    background: "rgba(0, 0, 0, 0.7)",
-                    color: "white",
-                    padding: "10px",
-                    borderRadius: "5px",
-                    fontFamily: "monospace",
-                    fontSize: "11px",
-                    maxWidth: "300px",
-                }}
-            >
-                <div>
-                    <strong>Controls:</strong>
-                </div>
-                <div>• Mouse: Rotate camera around globe</div>
-                <div>• Wheel: Zoom in/out</div>
-                <div>• Click satellites to view details</div>
-                <div>• Click empty space to deselect</div>
-                <div>• Sun position updates with time</div>
-            </div>
         </div>
     );
 }

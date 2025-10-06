@@ -31,7 +31,7 @@ export class EnhancedGlobe {
     private clouds: THREE.Mesh | null = null;
     private atmosphere: THREE.Mesh | null = null;
     private options: Required<EnhancedGlobeOptions>;
-    private directionalLight: THREE.DirectionalLight | null = null;
+    // private pointLight: THREE.PointLight | null = null;
 
     constructor(options: EnhancedGlobeOptions = {}) {
         this.options = {
@@ -90,7 +90,7 @@ export class EnhancedGlobe {
     }
 
     private async loadTexture(loader: THREE.TextureLoader, path: string, sRGB: boolean): Promise<THREE.Texture> {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve, _reject) => {
             loader.load(
                 path,
                 (texture) => {
@@ -100,8 +100,8 @@ export class EnhancedGlobe {
                     resolve(texture);
                 },
                 undefined,
-                (error) => {
-                    console.warn(`Failed to load texture ${path}, using fallback`, error);
+                (_error) => {
+                    console.warn(`Failed to load texture ${path}, using fallback`);
                     // Create a simple colored texture as fallback
                     const canvas = document.createElement("canvas");
                     canvas.width = 2;
@@ -116,7 +116,7 @@ export class EnhancedGlobe {
         });
     }
 
-    private createEarth(albedoMap: THREE.Texture, bumpMap: THREE.Texture, oceanMap: THREE.Texture, lightsMap: THREE.Texture, cloudsMap: THREE.Texture): void {
+    private createEarth(albedoMap: THREE.Texture, bumpMap: THREE.Texture, _oceanMap: THREE.Texture, lightsMap: THREE.Texture, _cloudsMap: THREE.Texture): void {
         const earthGeo = new THREE.SphereGeometry(this.options.radius, 64, 64);
 
         // Create a simple, reliable material that works across all Three.js versions
@@ -137,20 +137,18 @@ export class EnhancedGlobe {
 
         // Apply custom shader modifications for day/night texture switching
         try {
-            this.modifyEarthShader(earthMat, cloudsMap, lightsMap);
+            this.modifyEarthShaderSimple(earthMat, lightsMap);
         } catch (error) {
             console.warn("Failed to apply shader modifications, using basic material:", error);
         }
     }
 
-    private modifyEarthShader(material: THREE.MeshStandardMaterial, cloudsMap: THREE.Texture, lightsMap: THREE.Texture): void {
-        cloudsMap.wrapS = THREE.RepeatWrapping;
+    private modifyEarthShaderSimple(material: THREE.MeshStandardMaterial, lightsMap: THREE.Texture): void {
+        lightsMap.wrapS = THREE.RepeatWrapping;
 
         material.onBeforeCompile = (shader) => {
             try {
-                shader.uniforms.tClouds = { value: cloudsMap };
                 shader.uniforms.tNightLights = { value: lightsMap };
-                shader.uniforms.uv_xOffset = { value: 0 };
 
                 // Add uniforms to common section
                 if (shader.fragmentShader.includes("#include <common>")) {
@@ -158,136 +156,21 @@ export class EnhancedGlobe {
                         "#include <common>",
                         `
                         #include <common>
-                        uniform sampler2D tClouds;
                         uniform sampler2D tNightLights;
-                        uniform float uv_xOffset;
                         `
                     );
                 }
 
-                // Modify roughness to reverse ocean map values
-                if (shader.fragmentShader.includes("#include <roughnessmap_fragment>")) {
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        "#include <roughnessmap_fragment>",
-                        `
-                        float roughnessFactor = roughness;
-
-                        #ifdef USE_ROUGHNESSMAP
-                            vec4 texelRoughness = texture2D( roughnessMap, vRoughnessMapUv );
-                            // reversing the black and white values because we provide the ocean map
-                            texelRoughness = vec4(1.0) - texelRoughness;
-                            // reads channel G, compatible with a combined OcclusionRoughnessMetallic (RGB) texture
-                            roughnessFactor *= clamp(texelRoughness.g, 0.5, 1.0);
-                        #endif
-                        `
-                    );
-                }
-
-                // Modify emissive map to show night lights only on dark side
-                if (this.options.enableNightLights && shader.fragmentShader.includes("#include <emissivemap_fragment>")) {
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        "#include <emissivemap_fragment>",
-                        `
-                        #ifdef USE_EMISSIVEMAP
-                            vec4 emissiveColor = texture2D( emissiveMap, vEmissiveMapUv );
-                            
-                            // Show night lights only on the dark side of earth
-                            vec3 surfaceNormal = normalize(vNormal);
-                            
-                            // Get direction to sun from the first directional light
-                            #if NUM_DIR_LIGHTS > 0
-                                vec3 sunDirection = directionalLights[0].direction;
-                                float dayNightFactor = dot(surfaceNormal, sunDirection);
-                                // Show lights only when sun direction dot normal is negative (night side)
-                                emissiveColor *= 1.0 - smoothstep(-0.02, 0.0, dayNightFactor);
-                            #endif
-                            
-                            totalEmissiveRadiance *= emissiveColor.rgb;
-                        #endif
-                        `
-                    );
-                }
-
-                // Add day/night texture switching and atmospheric effects
+                // Add simple day/night texture switching
                 if (shader.fragmentShader.includes("#include <colorspace_fragment>")) {
                     shader.fragmentShader = shader.fragmentShader.replace(
                         "#include <colorspace_fragment>",
                         `
-                        // Day/Night texture switching based on sun direction
-                        vec3 surfaceNormal = normalize(vNormal);
-                        
-                        // Get direction to sun from the first directional light
-                        #if NUM_DIR_LIGHTS > 0
-                            vec3 sunDirection = directionalLights[0].direction;
-                            float dayNightFactor = dot(surfaceNormal, sunDirection);
-                            
-                            // Mix between day and night textures based on sun direction
-                            vec4 dayTexture = gl_FragColor;
-                            vec4 nightTexture = texture2D(tNightLights, vMapUv);
-                            
-                            // Smooth transition between day and night
-                            float nightFactor = smoothstep(-0.1, 0.1, dayNightFactor);
-                            gl_FragColor = mix(nightTexture, dayTexture, nightFactor);
-                        #endif
-
-                        ${
-                            this.options.enableCloudShadows
-                                ? `
-                        // Cloud shadows implementation
-                        float cloudsMapValue = texture2D(tClouds, vec2(vMapUv.x - uv_xOffset, vMapUv.y)).r;
-                        
-                        // Darken areas under clouds (clamp to minimum 0.2 to avoid too dark shadows)
-                        gl_FragColor.rgb *= max(1.0 - cloudsMapValue, 0.2);
-                        `
-                                : ""
-                        }
-
-                        // Add atmospheric coloring around the edges
-                        float intensity = 1.4 - dot(surfaceNormal, vec3(0.0, 0.0, 1.0));
-                        vec3 atmosphere = vec3(0.3, 0.6, 1.0) * pow(intensity, 5.0);
-                        gl_FragColor.rgb += atmosphere * 0.3;
+                        // Simple day/night texture switching
+                        vec4 nightTexture = texture2D(tNightLights, vMapUv);
+                        gl_FragColor = mix(nightTexture, gl_FragColor, 0.5);
 
                         #include <colorspace_fragment>
-                        `
-                    );
-                } else if (shader.fragmentShader.includes("#include <tonemapping_fragment>")) {
-                    // Fallback for older Three.js versions
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        "#include <tonemapping_fragment>",
-                        `
-                        // Day/Night texture switching based on sun direction
-                        vec3 surfaceNormal = normalize(vNormal);
-                        
-                        // Get direction to sun from the first directional light
-                        #if NUM_DIR_LIGHTS > 0
-                            vec3 sunDirection = directionalLights[0].direction;
-                            float dayNightFactor = dot(surfaceNormal, sunDirection);
-                            
-                            // Mix between day and night textures based on sun direction
-                            vec4 dayTexture = gl_FragColor;
-                            vec4 nightTexture = texture2D(tNightLights, vMapUv);
-                            
-                            // Smooth transition between day and night
-                            float nightFactor = smoothstep(-0.1, 0.1, dayNightFactor);
-                            gl_FragColor = mix(nightTexture, dayTexture, nightFactor);
-                        #endif
-
-                        ${
-                            this.options.enableCloudShadows
-                                ? `
-                        // Cloud shadows implementation
-                        float cloudsMapValue = texture2D(tClouds, vec2(vMapUv.x - uv_xOffset, vMapUv.y)).r;
-                        gl_FragColor.rgb *= max(1.0 - cloudsMapValue, 0.2);
-                        `
-                                : ""
-                        }
-
-                        // Add atmospheric coloring
-                        float intensity = 1.4 - dot(surfaceNormal, vec3(0.0, 0.0, 1.0));
-                        vec3 atmosphere = vec3(0.3, 0.6, 1.0) * pow(intensity, 5.0);
-                        gl_FragColor.rgb += atmosphere * 0.3;
-
-                        #include <tonemapping_fragment>
                         `
                     );
                 }
@@ -295,7 +178,7 @@ export class EnhancedGlobe {
                 // Save shader reference for dynamic updates
                 material.userData.shader = shader;
             } catch (error) {
-                console.error("Error modifying shader:", error);
+                console.warn("Error modifying shader:", error);
                 throw error;
             }
         };
@@ -376,22 +259,22 @@ export class EnhancedGlobe {
             this.clouds.rotateY(interval * 0.00002 * this.options.speedFactor);
         }
 
-        // Update cloud shadow offset
-        if (this.options.enableCloudShadows) {
-            const earthMaterial = this.earth.material as THREE.MeshStandardMaterial;
-            const shader = earthMaterial.userData.shader;
-            if (shader) {
-                const offset = (interval * 0.00001 * this.options.speedFactor) / (2 * Math.PI);
-                shader.uniforms.uv_xOffset.value += offset % 1;
-            }
-        }
+        // Update cloud shadow offset (disabled for simplified shader)
+        // if (this.options.enableCloudShadows) {
+        //     const earthMaterial = this.earth.material as THREE.MeshStandardMaterial;
+        //     const shader = earthMaterial.userData.shader;
+        //     if (shader && shader.uniforms && shader.uniforms.uv_xOffset) {
+        //         const offset = (interval * 0.00001 * this.options.speedFactor) / (2 * Math.PI);
+        //         shader.uniforms.uv_xOffset.value += offset % 1;
+        //     }
+        // }
     }
 
     /**
-     * Set the directional light (sun) for the globe
+     * Set the point light (sun) for the globe
      */
-    public setDirectionalLight(light: THREE.DirectionalLight): void {
-        this.directionalLight = light;
+    public setDirectionalLight(_light: THREE.DirectionalLight): void {
+        // this.pointLight = light;
     }
 
     /**

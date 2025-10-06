@@ -7,6 +7,14 @@ import { EntityManager, type RenderingSystem } from "./EntityManager";
 import type { OrbitalElements } from "./OrbitalElements";
 import { SatelliteEntity } from "./SatelliteEntity";
 import { TLEParser } from "./TLEParser";
+import { gstime } from "satellite.js";
+
+export const GlobeType = {
+    BASIC: "basic",
+    ENHANCED: "enhanced",
+} as const;
+
+export type GlobeType = (typeof GlobeType)[keyof typeof GlobeType];
 
 export interface GlobeEngineOptions {
     container: HTMLElement;
@@ -18,7 +26,7 @@ export interface GlobeEngineOptions {
     rotationSpeed?: number;
     maxSatellites?: number;
     renderingSystem?: RenderingSystem; // Single parameter to control rendering system
-    useEnhancedGlobe?: boolean; // Use enhanced globe with high-quality textures
+    globeType?: GlobeType; // Use enum for globe type selection
 }
 
 export class GlobeEngine {
@@ -38,6 +46,10 @@ export class GlobeEngine {
     private raycaster: THREE.Raycaster;
     private mouse: THREE.Vector2;
     private selectedEntity: SatelliteEntity | null = null;
+    private enableGlobeRotation: boolean = true;
+    private enableCameraRotation: boolean = true;
+    private initialCameraPosition: THREE.Vector3 = new THREE.Vector3();
+    private cameraRotationOffset: number = 0;
 
     private options: Required<GlobeEngineOptions>;
     private clock: THREE.Clock;
@@ -63,7 +75,7 @@ export class GlobeEngine {
             rotationSpeed: 0.001,
             maxSatellites: 50,
             renderingSystem: "instanced", // Default to instanced mesh
-            useEnhancedGlobe: false, // Default to enhanced globe
+            globeType: GlobeType.BASIC, // Default to basic globe
             ...options,
         };
 
@@ -103,6 +115,7 @@ export class GlobeEngine {
         const aspect = this.options.width / this.options.height;
         this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 100);
         this.camera.position.set(0, 0, 5);
+        this.initialCameraPosition.copy(this.camera.position);
     }
 
     private createRenderer(): void {
@@ -127,7 +140,7 @@ export class GlobeEngine {
     }
 
     private createGlobe(): void {
-        if (this.options.useEnhancedGlobe) {
+        if (this.options.globeType === GlobeType.ENHANCED) {
             // Use enhanced globe with high-quality rendering
             this.enhancedGlobe = new EnhancedGlobe({
                 radius: 1.0,
@@ -155,22 +168,57 @@ export class GlobeEngine {
             // Get the earth mesh for compatibility with existing code
             this.globe = this.enhancedGlobe.getEarth();
         } else {
-            // Use basic globe (legacy)
+            // Use basic globe with day/night texture support
             const geometry = new THREE.SphereGeometry(1, 64, 64);
 
-            // Create material with Earth texture
-            const material = new THREE.MeshPhongMaterial({
+            // Create material with Earth texture and night texture
+            const material = new THREE.MeshStandardMaterial({
                 map: this.createEarthTexture(),
                 bumpMap: this.createBumpTexture(),
                 bumpScale: 0.02,
-                shininess: 0.1,
+                roughness: 0.7,
+                metalness: 0.1,
+                side: THREE.FrontSide,
             });
+
+            // Apply day/night shader modifications to basic globe
+            this.modifyBasicGlobeShader(material);
 
             this.globe = new THREE.Mesh(geometry, material);
             this.globe.receiveShadow = true;
             this.globe.castShadow = true;
             this.scene.add(this.globe);
         }
+    }
+
+    public setGlobeRotation(enabled: boolean): void {
+        this.enableGlobeRotation = enabled;
+    }
+
+    public getGlobeRotation(): boolean {
+        return this.enableGlobeRotation;
+    }
+
+    public setCameraRotation(enabled: boolean): void {
+        this.enableCameraRotation = enabled;
+    }
+
+    public getCameraRotation(): boolean {
+        return this.enableCameraRotation;
+    }
+
+    public toggleCameraRotation(): void {
+        this.enableCameraRotation = !this.enableCameraRotation;
+    }
+
+    private calculateEarthRotation(): number {
+        const gmst = gstime(this.currentTime);
+
+        // GMST is in radians
+        const longitudeRadians = (this.longitude * Math.PI) / 180;
+        const rotationAngle = gmst + longitudeRadians;
+
+        return rotationAngle;
     }
 
     private createEarthTexture(): THREE.Texture {
@@ -184,6 +232,14 @@ export class GlobeEngine {
     private createBumpTexture(): THREE.Texture {
         const loader = new THREE.TextureLoader();
         const texture = loader.load("/assets/Bump.jpg");
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        return texture;
+    }
+
+    private createNightTexture(): THREE.Texture {
+        const loader = new THREE.TextureLoader();
+        const texture = loader.load("/assets/night_high_res_adjusted.jpg");
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
         return texture;
@@ -209,21 +265,18 @@ export class GlobeEngine {
     // }
 
     private createLights(): void {
-        // Ambient light
-        const ambientLight = new THREE.AmbientLight(0x404040, this.options.useEnhancedGlobe ? 5.0 : 15.0);
+        // Ambient light for overall illumination
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
         this.scene.add(ambientLight);
 
-        // Directional light (sun) - position will be calculated based on current time
-        this.sunLight = new THREE.DirectionalLight(0xffffff, this.options.useEnhancedGlobe ? 3.0 : 8.0);
+        // Directional light (sun) - simulates parallel sun rays
+        this.sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
         this.sunLight.castShadow = true;
-        this.sunLight.shadow.mapSize.width = 4096;
-        this.sunLight.shadow.mapSize.height = 4096;
+        this.sunLight.shadow.mapSize.width = 2048;
+        this.sunLight.shadow.mapSize.height = 2048;
         this.sunLight.shadow.camera.near = 0.1;
         this.sunLight.shadow.camera.far = 50;
-        this.sunLight.shadow.camera.left = -10;
-        this.sunLight.shadow.camera.right = 10;
-        this.sunLight.shadow.camera.top = 10;
-        this.sunLight.shadow.camera.bottom = -10;
+        this.sunLight.shadow.bias = -0.0001;
         this.scene.add(this.sunLight);
 
         // Set the sun light for the enhanced globe
@@ -239,12 +292,12 @@ export class GlobeEngine {
     }
 
     private createSun(): void {
-        // Create sun geometry - small sphere
-        const sunGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+        // Create sun geometry - larger sphere for better visibility
+        const sunGeometry = new THREE.SphereGeometry(0.2, 16, 16);
 
-        // Create sun material with bright yellow/white color and emissive properties
+        // Create sun material with bright yellow/white color
         const sunMaterial = new THREE.MeshBasicMaterial({
-            color: 0xffffaa,
+            color: 0xffff00,
         });
 
         // Create sun mesh
@@ -395,14 +448,12 @@ export class GlobeEngine {
 
         this.animationId = requestAnimationFrame(() => this.animate());
 
-        // Update stats
         if (this.stats) {
             this.stats.begin();
         }
 
         const deltaTime = this.clock.getDelta();
 
-        // Update controls (for damping)
         if (this.controls) {
             this.controls.update();
         }
@@ -411,12 +462,34 @@ export class GlobeEngine {
         this.currentTime = new Date(this.currentTime.getTime() + deltaTime * this.timeMultiplier * 1000);
         this.entityManager.setTime(this.currentTime);
 
-        // Update enhanced globe if enabled
+        // Rotate the globe based on actual Earth rotation
+        if (this.enableGlobeRotation) {
+            const rotationAngle = this.calculateEarthRotation();
+
+            if (this.enhancedGlobe) {
+                this.enhancedGlobe.getGroup().rotation.y = rotationAngle;
+            } else if (this.globe) {
+                this.globe.rotation.y = rotationAngle;
+            }
+        }
+
+        // Rotate the camera to match Earth rotation for stable shadows
+        if (this.enableCameraRotation) {
+            const rotationAngle = this.calculateEarthRotation();
+
+            // Calculate the rotation delta since last frame
+            const rotationDelta = rotationAngle - this.cameraRotationOffset;
+            this.cameraRotationOffset = rotationAngle;
+
+            // Apply rotation to camera position around Y-axis
+            const rotationMatrix = new THREE.Matrix4().makeRotationY(rotationDelta);
+            this.camera.position.applyMatrix4(rotationMatrix);
+        }
+
         if (this.enhancedGlobe) {
             this.enhancedGlobe.update(deltaTime * this.timeMultiplier * 1000);
         }
 
-        // Update sun position based on current time
         this.updateSunPosition();
 
         if (this.onTimeUpdate) {
@@ -425,7 +498,6 @@ export class GlobeEngine {
 
         this.renderer.render(this.scene, this.camera);
 
-        // End stats
         if (this.stats) {
             this.stats.end();
         }
@@ -434,28 +506,23 @@ export class GlobeEngine {
     private updateSunPosition(): void {
         if (!this.sunLight) return;
 
-        // Calculate sun position using SunCalc
         const sunPosition = SunCalc.getPosition(this.currentTime, this.latitude, this.longitude);
 
-        // Convert spherical coordinates to Cartesian coordinates
-        // Distance from Earth normalized to globe size (globe radius = 1)
-        const distance = 5; // Much closer to the globe for proper lighting
+        const distance = 10;
 
-        // Convert altitude and azimuth to Cartesian coordinates
-        const x = distance * Math.cos(sunPosition.altitude) * Math.sin(sunPosition.azimuth);
-        const y = distance * Math.sin(sunPosition.altitude);
-        const z = distance * Math.cos(sunPosition.altitude) * Math.cos(sunPosition.azimuth);
+        // Sun position remains in world space (doesn't rotate with Earth)
+        const z = distance * Math.cos(sunPosition.altitude) * Math.sin(sunPosition.azimuth);
+        const x = distance * Math.sin(sunPosition.altitude);
+        const y = distance * Math.cos(sunPosition.altitude) * Math.cos(sunPosition.azimuth);
 
-        // Update sun light position
         this.sunLight.position.set(x, y, z);
+        this.sunLight.target.position.set(0, 0, 0);
 
-        // Update sun object position to match the light
         if (this.sun) {
             this.sun.position.set(x, y, z);
         }
 
-        // Update light intensity based on sun altitude (darker when sun is below horizon)
-        const intensity = Math.max(0, Math.sin(sunPosition.altitude));
+        const intensity = 10;
         this.sunLight.intensity = intensity;
     }
 
@@ -720,5 +787,95 @@ export class GlobeEngine {
 
     public getSun(): THREE.Mesh | null {
         return this.sun;
+    }
+
+    public setGlobeType(globeType: GlobeType): void {
+        if (this.options.globeType === globeType) return;
+
+        // Remove current globe
+        if (this.enhancedGlobe) {
+            this.scene.remove(this.enhancedGlobe.getGroup());
+            this.enhancedGlobe.dispose();
+            this.enhancedGlobe = null;
+        } else if (this.globe) {
+            this.scene.remove(this.globe);
+        }
+
+        // Update options
+        this.options.globeType = globeType;
+
+        // Create new globe
+        this.createGlobe();
+    }
+
+    public getGlobeType(): GlobeType {
+        return this.options.globeType;
+    }
+
+    private modifyBasicGlobeShader(material: THREE.MeshStandardMaterial): void {
+        const nightTexture = this.createNightTexture();
+
+        material.onBeforeCompile = (shader) => {
+            try {
+                // Add uniforms
+                shader.uniforms.tNightLights = { value: nightTexture };
+
+                // Add uniforms to common section
+                if (shader.fragmentShader.includes("#include <common>")) {
+                    shader.fragmentShader = shader.fragmentShader.replace(
+                        "#include <common>",
+                        `
+                        #include <common>
+                        uniform sampler2D tNightLights;
+                        `
+                    );
+                }
+
+                // Add day/night texture switching - simplified approach
+                if (shader.fragmentShader.includes("#include <colorspace_fragment>")) {
+                    shader.fragmentShader = shader.fragmentShader.replace(
+                        "#include <colorspace_fragment>",
+                        `
+                        // Simple day/night texture switching
+                        vec4 nightTexture = texture2D(tNightLights, vMapUv);
+                        gl_FragColor = mix(nightTexture, gl_FragColor, 0.5);
+
+                        #include <colorspace_fragment>
+                        `
+                    );
+                }
+
+                // Save shader reference for dynamic updates
+                material.userData.shader = shader;
+            } catch (error) {
+                console.warn("Failed to apply basic globe shader modifications:", error);
+                // Don't apply any modifications if there's an error
+            }
+        };
+    }
+
+    public getSunLightPosition(): THREE.Vector3 | null {
+        return this.sunLight ? this.sunLight.position.clone() : null;
+    }
+
+    public getSunLightIntensity(): number {
+        return this.sunLight ? this.sunLight.intensity : 0;
+    }
+
+    public setTimeFromTimeline(time: Date): void {
+        this.currentTime = time;
+        this.entityManager.setTime(time);
+    }
+
+    public resetToCurrentTime(): void {
+        this.currentTime = new Date();
+        this.entityManager.setTime(this.currentTime);
+    }
+
+    public getTimelineRange(): { start: Date; end: Date } {
+        const now = new Date();
+        const start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours ago
+        const end = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+        return { start, end };
     }
 }
