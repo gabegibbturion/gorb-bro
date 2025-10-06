@@ -1,7 +1,7 @@
-import * as satellite from 'satellite.js';
-import * as THREE from 'three';
-import { OrbitVisualization } from './OrbitVisualization';
-import type { ClassicalOrbitalElements } from './OrbitalElements';
+import * as satellite from "satellite.js";
+import * as THREE from "three";
+import { OrbitVisualization } from "./OrbitVisualization";
+import type { ClassicalOrbitalElements } from "./OrbitalElements";
 
 // Legacy TLE interface for backward compatibility
 export interface TLEData {
@@ -45,7 +45,6 @@ export class SatelliteEntity {
         this.name = options.name;
         this.satrec = options.satrec;
 
-
         this.options = {
             color: 0xffff00,
             size: 0.01, // Much smaller size for scaled coordinates
@@ -54,7 +53,7 @@ export class SatelliteEntity {
             trailColor: 0xffff00,
             showOrbit: false,
             orbitColor: 0x00ff00,
-            ...options
+            ...options,
         };
 
         // Only create trail if needed (performance optimization)
@@ -65,7 +64,6 @@ export class SatelliteEntity {
         // Lazy-load orbit visualization only when requested (huge performance boost)
         // this.createOrbitVisualization();
     }
-
 
     private createTrail(): void {
         if (!this.options.showTrail) return;
@@ -78,7 +76,7 @@ export class SatelliteEntity {
             transparent: true,
             opacity: 0.8,
             linewidth: 1,
-            vertexColors: true // Enable vertex colors for gradient effect
+            vertexColors: true, // Enable vertex colors for gradient effect
         });
 
         this.trail = new THREE.Line(this.trailGeometry, this.trailMaterial);
@@ -97,7 +95,7 @@ export class SatelliteEntity {
             opacity: 0.6,
             lineWidth: 1,
             segments: 64,
-            showHalfOrbit: true
+            showHalfOrbit: true,
         });
 
         this.orbitVisualization.setVisible(this.options.showOrbit);
@@ -116,11 +114,11 @@ export class SatelliteEntity {
         return {
             semiMajorAxis: this.satrec.a * earthRadius, // Convert from Earth radii to km
             eccentricity: this.satrec.ecco,
-            inclination: this.satrec.inclo * 180 / Math.PI, // Convert from radians to degrees
-            rightAscensionOfAscendingNode: this.satrec.nodeo * 180 / Math.PI,
-            argumentOfPeriapsis: this.satrec.argpo * 180 / Math.PI,
-            meanAnomaly: this.satrec.mo * 180 / Math.PI,
-            epoch: new Date()
+            inclination: (this.satrec.inclo * 180) / Math.PI, // Convert from radians to degrees
+            rightAscensionOfAscendingNode: (this.satrec.nodeo * 180) / Math.PI,
+            argumentOfPeriapsis: (this.satrec.argpo * 180) / Math.PI,
+            meanAnomaly: (this.satrec.mo * 180) / Math.PI,
+            epoch: new Date(),
         };
     }
 
@@ -149,17 +147,9 @@ export class SatelliteEntity {
                 const earthRadiusKm = 6371;
                 const scaleFactor = 1 / earthRadiusKm;
 
-                this.currentPosition.set(
-                    pos.x * scaleFactor,
-                    pos.y * scaleFactor,
-                    pos.z * scaleFactor
-                );
+                this.currentPosition.set(pos.x * scaleFactor, pos.y * scaleFactor, pos.z * scaleFactor);
 
-                this.currentVelocity.set(
-                    vel.x * scaleFactor,
-                    vel.y * scaleFactor,
-                    vel.z * scaleFactor
-                );
+                this.currentVelocity.set(vel.x * scaleFactor, vel.y * scaleFactor, vel.z * scaleFactor);
 
                 this.lastUpdateTime = time;
             }
@@ -167,7 +157,6 @@ export class SatelliteEntity {
             // Propagation error - satellite position not updated
         }
     }
-
 
     // No longer returns a mesh - satellites are just data points
 
@@ -206,14 +195,14 @@ export class SatelliteEntity {
         const eciPos = {
             x: this.currentPosition.x / scaleFactor, // Convert back to km
             y: this.currentPosition.y / scaleFactor,
-            z: this.currentPosition.z / scaleFactor
+            z: this.currentPosition.z / scaleFactor,
         };
         const positionGd = satellite.eciToGeodetic(eciPos, gmst);
 
         return {
             latitude: satellite.degreesLat(positionGd.latitude),
             longitude: satellite.degreesLong(positionGd.longitude),
-            altitude: positionGd.height
+            altitude: positionGd.height,
         };
     }
 
@@ -230,17 +219,20 @@ export class SatelliteEntity {
         return this.currentVelocity.clone();
     }
 
-    public getOrbitalElements(): any {
+    public getOrbitalElements(): ClassicalOrbitalElements {
+        // Extract Classical Orbital Elements from satrec
+        const earthRadius = 6371; // km
+
         return {
-            inclination: this.satrec.inclo,
-            rightAscension: this.satrec.nodeo,
+            semiMajorAxis: this.satrec.a * earthRadius, // Convert from Earth radii to km
             eccentricity: this.satrec.ecco,
-            argumentOfPerigee: this.satrec.argpo,
-            meanAnomaly: this.satrec.mo,
-            meanMotion: this.satrec.no
+            inclination: (this.satrec.inclo * 180) / Math.PI, // Convert from radians to degrees
+            rightAscensionOfAscendingNode: (this.satrec.nodeo * 180) / Math.PI,
+            argumentOfPeriapsis: (this.satrec.argpo * 180) / Math.PI,
+            meanAnomaly: (this.satrec.mo * 180) / Math.PI,
+            epoch: new Date(),
         };
     }
-
 
     public setVisible(visible: boolean): void {
         this.isVisible = visible;
@@ -271,7 +263,7 @@ export class SatelliteEntity {
         if (this.trail) {
             this.trail.geometry.dispose();
             if (Array.isArray(this.trail.material)) {
-                this.trail.material.forEach(material => material.dispose());
+                this.trail.material.forEach((material) => material.dispose());
             } else {
                 this.trail.material.dispose();
             }

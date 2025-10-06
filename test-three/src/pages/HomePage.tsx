@@ -20,26 +20,29 @@ const HomePage: React.FC = () => {
                 fontFamily: "Arial, sans-serif",
             }}
         >
-            <div style={{ textAlign: "center", maxWidth: "600px", padding: "40px" }}>
-                <h1 style={{ fontSize: "3rem", marginBottom: "20px", fontWeight: "bold" }}>Three.js React App</h1>
+            <div style={{ textAlign: "center", maxWidth: "90vw", padding: "20px", boxSizing: "border-box" }}>
+                <h1 style={{ fontSize: "clamp(2rem, 5vw, 3rem)", marginBottom: "15px", fontWeight: "bold" }}>Three.js React App</h1>
 
-                <p style={{ fontSize: "1.2rem", marginBottom: "40px", opacity: 0.9 }}>Explore interactive 3D visualizations with satellite tracking and particle systems</p>
+                <p style={{ fontSize: "clamp(1rem, 2.5vw, 1.2rem)", marginBottom: "30px", opacity: 0.9 }}>
+                    Explore interactive 3D visualizations with satellite tracking and particle systems
+                </p>
 
-                <div style={{ display: "flex", gap: "20px", justifyContent: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "clamp(10px, 3vw, 20px)", justifyContent: "center", flexWrap: "wrap" }}>
                     <Link
                         to="/globe"
                         style={{
                             display: "inline-block",
-                            padding: "15px 30px",
+                            padding: "clamp(10px, 2vw, 15px) clamp(20px, 4vw, 30px)",
                             backgroundColor: "rgba(255, 255, 255, 0.2)",
                             color: "white",
                             textDecoration: "none",
                             borderRadius: "10px",
                             border: "2px solid rgba(255, 255, 255, 0.3)",
-                            fontSize: "1.1rem",
+                            fontSize: "clamp(0.9rem, 2vw, 1.1rem)",
                             fontWeight: "bold",
                             transition: "all 0.3s ease",
                             backdropFilter: "blur(10px)",
+                            minWidth: "fit-content",
                         }}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.3)";
@@ -57,16 +60,17 @@ const HomePage: React.FC = () => {
                         to="/particles"
                         style={{
                             display: "inline-block",
-                            padding: "15px 30px",
+                            padding: "clamp(10px, 2vw, 15px) clamp(20px, 4vw, 30px)",
                             backgroundColor: "rgba(255, 255, 255, 0.2)",
                             color: "white",
                             textDecoration: "none",
                             borderRadius: "10px",
                             border: "2px solid rgba(255, 255, 255, 0.3)",
-                            fontSize: "1.1rem",
+                            fontSize: "clamp(0.9rem, 2vw, 1.1rem)",
                             fontWeight: "bold",
                             transition: "all 0.3s ease",
                             backdropFilter: "blur(10px)",
+                            minWidth: "fit-content",
                         }}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.3)";
@@ -81,7 +85,7 @@ const HomePage: React.FC = () => {
                     </Link>
                 </div>
 
-                <div style={{ marginTop: "40px", fontSize: "0.9rem", opacity: 0.7 }}>
+                <div style={{ marginTop: "30px", fontSize: "clamp(0.8rem, 2vw, 0.9rem)", opacity: 0.7 }}>
                     <p>Features: Real-time satellite tracking • 1M particle system • Performance monitoring</p>
                 </div>
             </div>

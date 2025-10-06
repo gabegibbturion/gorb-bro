@@ -27,7 +27,6 @@ const Profiler: React.FC<ProfilerProps> = ({ style, className, showFPS = true, s
     const frameCountRef = useRef(0);
     const lastTimeRef = useRef(performance.now());
     const fpsHistoryRef = useRef<number[]>([]);
-    const renderStartRef = useRef(0);
 
     useEffect(() => {
         const updatePerformance = () => {
@@ -78,27 +77,28 @@ const Profiler: React.FC<ProfilerProps> = ({ style, className, showFPS = true, s
             zIndex: 1000,
             backgroundColor: "rgba(0, 0, 0, 0.8)",
             color: "white",
-            padding: "10px",
-            borderRadius: "5px",
+            padding: "6px 8px",
+            borderRadius: "4px",
             fontFamily: "monospace",
-            fontSize: "12px",
-            lineHeight: "1.4",
-            minWidth: "150px",
+            fontSize: "10px",
+            lineHeight: "1.2",
+            minWidth: "100px",
+            maxWidth: "200px",
             backdropFilter: "blur(10px)",
             border: "1px solid rgba(255, 255, 255, 0.1)",
         };
 
         switch (position) {
             case "top-left":
-                return { ...baseStyles, top: "10px", left: "10px" };
+                return { ...baseStyles, top: "60px", left: "10px" };
             case "top-right":
-                return { ...baseStyles, top: "10px", right: "10px" };
+                return { ...baseStyles, top: "60px", right: "10px" };
             case "bottom-left":
                 return { ...baseStyles, bottom: "10px", left: "10px" };
             case "bottom-right":
                 return { ...baseStyles, bottom: "10px", right: "10px" };
             default:
-                return { ...baseStyles, top: "10px", right: "10px" };
+                return { ...baseStyles, top: "60px", right: "10px" };
         }
     };
 
@@ -128,7 +128,7 @@ const Profiler: React.FC<ProfilerProps> = ({ style, className, showFPS = true, s
 
             {showRenderTime && <div style={{ color: "#00ffff" }}>Frames: {performanceData.frameCount}</div>}
 
-            <div style={{ color: "#888", fontSize: "10px", marginTop: "5px" }}>{new Date().toLocaleTimeString()}</div>
+            <div style={{ color: "#888", fontSize: "8px", marginTop: "3px" }}>{new Date().toLocaleTimeString()}</div>
         </div>
     );
 };

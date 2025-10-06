@@ -2,7 +2,6 @@ import { Route, Routes } from "react-router-dom";
 import "./App.css";
 import Navigation from "./components/Navigation";
 import GlobePage from "./pages/GlobePage";
-import ParticlesPage from "./pages/ParticlesPage";
 import HomePage from "./pages/HomePage";
 
 function App() {
@@ -13,7 +12,6 @@ function App() {
             <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/globe" element={<GlobePage />} />
-                <Route path="/particles" element={<ParticlesPage />} />
                 <Route path="*" element={<GlobePage />} />
             </Routes>
         </div>

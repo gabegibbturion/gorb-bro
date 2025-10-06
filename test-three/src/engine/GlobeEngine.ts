@@ -7,11 +7,15 @@ import { EntityManager, type RenderingSystem } from "./EntityManager";
 import type { OrbitalElements } from "./OrbitalElements";
 import { SatelliteEntity } from "./SatelliteEntity";
 import { TLEParser } from "./TLEParser";
+import { OrbitManager, type OrbitRenderingSystem } from "./OrbitManager";
+import { TileGlobe } from "./TileGlobe";
+import { TileProvider } from "./TileProvider";
 import { gstime } from "satellite.js";
 
 export const GlobeType = {
     BASIC: "basic",
     ENHANCED: "enhanced",
+    TILE_PROVIDED: "tile_provided",
 } as const;
 
 export type GlobeType = (typeof GlobeType)[keyof typeof GlobeType];
@@ -27,6 +31,10 @@ export interface GlobeEngineOptions {
     maxSatellites?: number;
     renderingSystem?: RenderingSystem; // Single parameter to control rendering system
     globeType?: GlobeType; // Use enum for globe type selection
+    orbitRenderingSystem?: OrbitRenderingSystem; // Orbit rendering system
+    maxOrbits?: number; // Maximum number of orbits to render
+    tileProvider?: TileProvider; // Tile provider for tile globe
+    customTileUrl?: string; // Custom tile URL template for CUSTOM provider
 }
 
 export class GlobeEngine {
@@ -35,8 +43,10 @@ export class GlobeEngine {
     private camera!: THREE.PerspectiveCamera;
     private renderer!: THREE.WebGLRenderer;
     private entityManager!: EntityManager;
+    private orbitManager!: OrbitManager;
     private globe!: THREE.Mesh;
     private enhancedGlobe: EnhancedGlobe | null = null;
+    private tileGlobe: TileGlobe | null = null;
     private controls!: OrbitControls;
     private sunLight!: THREE.DirectionalLight;
     private sun!: THREE.Mesh;
@@ -76,6 +86,10 @@ export class GlobeEngine {
             maxSatellites: 50,
             renderingSystem: "instanced", // Default to instanced mesh
             globeType: GlobeType.BASIC, // Default to basic globe
+            orbitRenderingSystem: "line", // Default to line-based orbits
+            maxOrbits: 1000000, // Default max orbits
+            tileProvider: TileProvider.ESRI, // Default to Esri World Imagery
+            customTileUrl: "", // Default empty custom URL
             ...options,
         };
 
@@ -98,6 +112,7 @@ export class GlobeEngine {
         this.createGlobe();
         this.createLights();
         this.createEntityManager();
+        this.createOrbitManager();
         this.createControls();
         this.setupEventListeners();
 
@@ -167,17 +182,39 @@ export class GlobeEngine {
 
             // Get the earth mesh for compatibility with existing code
             this.globe = this.enhancedGlobe.getEarth();
+        } else if (this.options.globeType === GlobeType.TILE_PROVIDED) {
+            // Use tile-based globe
+            this.tileGlobe = new TileGlobe({
+                radius: 1.0,
+                segments: 64,
+                tileProvider: this.options.tileProvider,
+                customTileUrl: this.options.customTileUrl,
+                enableBumpMap: true,
+                bumpScale: 0.02,
+                roughness: 0.7,
+                metalness: 0.1,
+            });
+
+            // Add the tile globe to the scene
+            const tileGlobeGroup = this.tileGlobe.getGroup();
+            this.scene.add(tileGlobeGroup);
+
+            // Set camera for tile globe
+            this.tileGlobe.setCamera(this.camera);
+
+            // Get the mesh for compatibility with existing code
+            this.globe = this.tileGlobe.getMesh();
         } else {
             // Use basic globe with day/night texture support
             const geometry = new THREE.SphereGeometry(1, 64, 64);
 
-            // Create material with Earth texture and night texture
+            // Create material with Earth texture (not tile provider)
             const material = new THREE.MeshStandardMaterial({
                 map: this.createEarthTexture(),
                 bumpMap: this.createBumpTexture(),
                 bumpScale: 0.02,
-                roughness: 0.7,
-                metalness: 0.1,
+                roughness: 0.8,
+                metalness: 0.05,
                 side: THREE.FrontSide,
             });
 
@@ -237,14 +274,6 @@ export class GlobeEngine {
         return texture;
     }
 
-    private createNightTexture(): THREE.Texture {
-        const loader = new THREE.TextureLoader();
-        const texture = loader.load("/assets/night_high_res_adjusted.jpg");
-        texture.wrapS = THREE.RepeatWrapping;
-        texture.wrapT = THREE.RepeatWrapping;
-        return texture;
-    }
-
     // private createSkybox(): void {
     //     // Create a large sphere for the skybox
     //     const skyboxGeometry = new THREE.SphereGeometry(500, 32, 32);
@@ -265,12 +294,12 @@ export class GlobeEngine {
     // }
 
     private createLights(): void {
-        // Ambient light for overall illumination
-        const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
+        // Ambient light for overall illumination - reduced intensity
+        const ambientLight = new THREE.AmbientLight(0x404040, 15);
         this.scene.add(ambientLight);
 
-        // Directional light (sun) - simulates parallel sun rays
-        this.sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        // Directional light (sun) - reduced intensity for better balance
+        this.sunLight = new THREE.DirectionalLight(0xffffff, 0.6);
         this.sunLight.castShadow = true;
         this.sunLight.shadow.mapSize.width = 2048;
         this.sunLight.shadow.mapSize.height = 2048;
@@ -321,6 +350,20 @@ export class GlobeEngine {
                 this.onSatelliteUpdate(satellites);
             }
         });
+    }
+
+    private createOrbitManager(): void {
+        this.orbitManager = new OrbitManager(this.scene, {
+            renderingSystem: this.options.orbitRenderingSystem,
+            maxOrbits: this.options.maxOrbits,
+            enableLOD: true,
+            enableFrustumCulling: true,
+            baseSegments: 64,
+            baseLineWidth: 1.0,
+        });
+
+        // Set camera for orbit manager
+        this.orbitManager.setCamera(this.camera);
     }
 
     private createControls(): void {
@@ -468,6 +511,8 @@ export class GlobeEngine {
 
             if (this.enhancedGlobe) {
                 this.enhancedGlobe.getGroup().rotation.y = rotationAngle;
+            } else if (this.tileGlobe) {
+                this.tileGlobe.getGroup().rotation.y = rotationAngle;
             } else if (this.globe) {
                 this.globe.rotation.y = rotationAngle;
             }
@@ -489,6 +534,13 @@ export class GlobeEngine {
         if (this.enhancedGlobe) {
             this.enhancedGlobe.update(deltaTime * this.timeMultiplier * 1000);
         }
+
+        if (this.tileGlobe) {
+            this.tileGlobe.update(deltaTime * this.timeMultiplier * 1000);
+        }
+
+        // Update orbit manager
+        this.orbitManager.update();
 
         this.updateSunPosition();
 
@@ -712,6 +764,8 @@ export class GlobeEngine {
     public setGlobeVisible(visible: boolean): void {
         if (this.enhancedGlobe) {
             this.enhancedGlobe.setVisible(visible);
+        } else if (this.tileGlobe) {
+            this.tileGlobe.setVisible(visible);
         } else {
             this.globe.visible = visible;
         }
@@ -720,6 +774,8 @@ export class GlobeEngine {
     public getGlobeVisible(): boolean {
         if (this.enhancedGlobe) {
             return this.enhancedGlobe.getGroup().visible;
+        } else if (this.tileGlobe) {
+            return this.tileGlobe.getVisible();
         } else {
             return this.globe.visible;
         }
@@ -744,10 +800,16 @@ export class GlobeEngine {
     public dispose(): void {
         this.stop();
         this.entityManager.dispose();
+        this.orbitManager.dispose();
 
         if (this.enhancedGlobe) {
             this.enhancedGlobe.dispose();
             this.enhancedGlobe = null;
+        }
+
+        if (this.tileGlobe) {
+            this.tileGlobe.dispose();
+            this.tileGlobe = null;
         }
 
         if (this.controls) {
@@ -769,6 +831,16 @@ export class GlobeEngine {
 
     public getEnhancedGlobe(): EnhancedGlobe | null {
         return this.enhancedGlobe;
+    }
+
+    public getTileGlobe(): TileGlobe | null {
+        return this.tileGlobe;
+    }
+
+    public forceLoadTiles(): void {
+        if (this.tileGlobe) {
+            this.tileGlobe.forceLoadTiles();
+        }
     }
 
     public setSunVisible(visible: boolean): void {
@@ -797,6 +869,10 @@ export class GlobeEngine {
             this.scene.remove(this.enhancedGlobe.getGroup());
             this.enhancedGlobe.dispose();
             this.enhancedGlobe = null;
+        } else if (this.tileGlobe) {
+            this.scene.remove(this.tileGlobe.getGroup());
+            this.tileGlobe.dispose();
+            this.tileGlobe = null;
         } else if (this.globe) {
             this.scene.remove(this.globe);
         }
@@ -812,46 +888,10 @@ export class GlobeEngine {
         return this.options.globeType;
     }
 
-    private modifyBasicGlobeShader(material: THREE.MeshStandardMaterial): void {
-        const nightTexture = this.createNightTexture();
-
-        material.onBeforeCompile = (shader) => {
-            try {
-                // Add uniforms
-                shader.uniforms.tNightLights = { value: nightTexture };
-
-                // Add uniforms to common section
-                if (shader.fragmentShader.includes("#include <common>")) {
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        "#include <common>",
-                        `
-                        #include <common>
-                        uniform sampler2D tNightLights;
-                        `
-                    );
-                }
-
-                // Add day/night texture switching - simplified approach
-                if (shader.fragmentShader.includes("#include <colorspace_fragment>")) {
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        "#include <colorspace_fragment>",
-                        `
-                        // Simple day/night texture switching
-                        vec4 nightTexture = texture2D(tNightLights, vMapUv);
-                        gl_FragColor = mix(nightTexture, gl_FragColor, 0.5);
-
-                        #include <colorspace_fragment>
-                        `
-                    );
-                }
-
-                // Save shader reference for dynamic updates
-                material.userData.shader = shader;
-            } catch (error) {
-                console.warn("Failed to apply basic globe shader modifications:", error);
-                // Don't apply any modifications if there's an error
-            }
-        };
+    private modifyBasicGlobeShader(_material: THREE.MeshStandardMaterial): void {
+        // Temporarily disable shader modifications to fix compilation errors
+        // TODO: Implement proper day/night shader switching
+        console.log("Basic globe shader modifications disabled to prevent compilation errors");
     }
 
     public getSunLightPosition(): THREE.Vector3 | null {
@@ -877,5 +917,147 @@ export class GlobeEngine {
         const start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours ago
         const end = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
         return { start, end };
+    }
+
+    // Orbit Management Methods
+    public addOrbit(id: string, coe: OrbitalElements, color: number = 0x00ff00, opacity: number = 0.6, segments?: number, lineWidth?: number): void {
+        console.log(`GlobeEngine: Adding orbit ${id} with COE:`, coe);
+
+        // Convert orbital elements to ClassicalOrbitalElements if needed
+        let classicalCoe;
+        if ("semiMajorAxis" in coe) {
+            classicalCoe = coe as any;
+            console.log(`GlobeEngine: Using existing COE for orbit ${id}`);
+        } else {
+            // Convert from TLE or other format
+            // For now, create a default COE - in a full implementation,
+            // you'd extract the actual orbital elements from the TLE
+            classicalCoe = {
+                semiMajorAxis: 7000, // Default altitude
+                eccentricity: 0.01,
+                inclination: 51.6,
+                rightAscensionOfAscendingNode: 0,
+                argumentOfPeriapsis: 0,
+                meanAnomaly: 0,
+                epoch: new Date(),
+            };
+            console.log(`GlobeEngine: Using default COE for orbit ${id}`);
+        }
+
+        console.log(`GlobeEngine: Final COE for orbit ${id}:`, classicalCoe);
+        this.orbitManager.addOrbit(id, classicalCoe, color, opacity, segments, lineWidth);
+        console.log(`GlobeEngine: Orbit count after adding ${id}: ${this.orbitManager.getOrbitCount()}`);
+    }
+
+    public removeOrbit(id: string): void {
+        this.orbitManager.removeOrbit(id);
+    }
+
+    public setOrbitVisible(id: string, visible: boolean): void {
+        this.orbitManager.setOrbitVisible(id, visible);
+    }
+
+    public toggleOrbitVisibility(id: string): void {
+        this.orbitManager.toggleOrbitVisibility(id);
+    }
+
+    public setAllOrbitsVisible(visible: boolean): void {
+        this.orbitManager.setAllOrbitsVisible(visible);
+    }
+
+    public setOrbitRenderingSystem(system: OrbitRenderingSystem): void {
+        this.orbitManager.setRenderingSystem(system);
+    }
+
+    public getOrbitRenderingSystem(): OrbitRenderingSystem {
+        return this.orbitManager.getRenderingSystem();
+    }
+
+    public getOrbitCount(): number {
+        return this.orbitManager.getOrbitCount();
+    }
+
+    public getVisibleOrbitCount(): number {
+        return this.orbitManager.getVisibleOrbitCount();
+    }
+
+    public getOrbitSystemInfo(): any {
+        return this.orbitManager.getSystemInfo();
+    }
+
+    public clearAllOrbits(): void {
+        this.orbitManager.clear();
+    }
+
+    // Tile Provider Management Methods
+    public setTileProvider(provider: TileProvider, customUrl?: string): void {
+        this.options.tileProvider = provider;
+        if (customUrl && provider === TileProvider.CUSTOM) {
+            this.options.customTileUrl = customUrl;
+        }
+
+        // Recreate globe with new tile provider
+        this.recreateGlobe();
+    }
+
+    public getTileProvider(): TileProvider {
+        return this.options.tileProvider;
+    }
+
+    public getCustomTileUrl(): string {
+        return this.options.customTileUrl;
+    }
+
+    public getAvailableTileProviders(): { value: TileProvider; label: string; description: string }[] {
+        return [
+            {
+                value: TileProvider.OPENSTREETMAP,
+                label: "OpenStreetMap",
+                description: "Free, open-source map tiles",
+            },
+            {
+                value: TileProvider.CARTO,
+                label: "CartoDB",
+                description: "Light, clean map style",
+            },
+            {
+                value: TileProvider.STAMEN,
+                label: "Stamen Terrain",
+                description: "Terrain-focused map tiles",
+            },
+            {
+                value: TileProvider.ESRI,
+                label: "Esri World Imagery",
+                description: "Satellite imagery from Esri",
+            },
+            {
+                value: TileProvider.NASA,
+                label: "NASA Blue Marble",
+                description: "NASA's Blue Marble imagery",
+            },
+            {
+                value: TileProvider.CUSTOM,
+                label: "Custom",
+                description: "Use your own tile server",
+            },
+        ];
+    }
+
+    private recreateGlobe(): void {
+        // Remove current globe
+        if (this.enhancedGlobe) {
+            this.scene.remove(this.enhancedGlobe.getGroup());
+            this.enhancedGlobe.dispose();
+            this.enhancedGlobe = null;
+        } else if (this.tileGlobe) {
+            this.scene.remove(this.tileGlobe.getGroup());
+            this.tileGlobe.dispose();
+            this.tileGlobe = null;
+        } else if (this.globe) {
+            this.scene.remove(this.globe);
+        }
+
+        // Create new globe with updated tile provider
+        this.createGlobe();
     }
 }

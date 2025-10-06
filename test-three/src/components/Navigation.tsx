@@ -7,23 +7,26 @@ const Navigation: React.FC = () => {
     const navItems = [
         { path: "/", label: "Home", icon: "🏠" },
         { path: "/globe", label: "Globe", icon: "🌍" },
-        { path: "/particles", label: "Particles", icon: "✨" },
     ];
 
     return (
         <nav
             style={{
                 position: "fixed",
-                top: "20px",
+                top: "10px",
                 left: "50%",
+                transform: "translateX(-50%)",
                 zIndex: 1000,
                 display: "flex",
-                gap: "10px",
+                gap: "6px",
                 backgroundColor: "rgba(0, 0, 0, 0.8)",
-                padding: "10px",
-                borderRadius: "10px",
+                padding: "6px 8px",
+                borderRadius: "8px",
                 backdropFilter: "blur(10px)",
                 border: "1px solid rgba(255, 255, 255, 0.1)",
+                maxWidth: "calc(100vw - 20px)",
+                flexWrap: "wrap",
+                justifyContent: "center",
             }}
         >
             {navItems.map((item) => (
@@ -33,16 +36,18 @@ const Navigation: React.FC = () => {
                     style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: "8px",
-                        padding: "10px 16px",
+                        gap: "4px",
+                        padding: "6px 10px",
                         backgroundColor: location.pathname === item.path ? "#007bff" : "transparent",
                         color: "white",
                         textDecoration: "none",
-                        borderRadius: "6px",
-                        fontSize: "14px",
+                        borderRadius: "4px",
+                        fontSize: "12px",
                         fontWeight: "500",
                         transition: "all 0.3s ease",
                         border: location.pathname === item.path ? "1px solid rgba(255, 255, 255, 0.2)" : "1px solid transparent",
+                        whiteSpace: "nowrap",
+                        minWidth: "fit-content",
                     }}
                     onMouseEnter={(e) => {
                         if (location.pathname !== item.path) {
@@ -55,7 +60,7 @@ const Navigation: React.FC = () => {
                         }
                     }}
                 >
-                    <span style={{ fontSize: "16px" }}>{item.icon}</span>
+                    <span style={{ fontSize: "14px" }}>{item.icon}</span>
                     {item.label}
                 </Link>
             ))}

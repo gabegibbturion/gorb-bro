@@ -3,6 +3,7 @@ import { GlobeEngine, GlobeType } from "../engine/GlobeEngine";
 import type { ClassicalOrbitalElements } from "../engine/OrbitalElements";
 import { OrbitalElementsGenerator } from "../engine/OrbitalElements";
 import type { RenderingSystem } from "../engine/EntityManager";
+import type { OrbitRenderingSystem } from "../engine/OrbitManager";
 
 interface GlobeProps {
     style?: React.CSSProperties;
@@ -24,18 +25,16 @@ const sampleSatellites: ClassicalOrbitalElements[] = [
 export default function Globe({ style, className, onEngineReady, onSatelliteUpdate, onTimeUpdate }: GlobeProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const engineRef = useRef<GlobeEngine | null>(null);
-    const [isReady, setIsReady] = useState(false);
+    const [, setIsReady] = useState(false);
     const [satelliteCount, setSatelliteCount] = useState(0);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [_satelliteLocations, setSatelliteLocations] = useState<{ [key: string]: { latitude: number; longitude: number; altitude: number } }>({});
     const [isPaused, setIsPaused] = useState(false);
     const [timeMultiplier, setTimeMultiplier] = useState(1);
-    const [showOrbits, setShowOrbits] = useState(false);
     const [satelliteCountInput, setSatelliteCountInput] = useState<any>(100);
-    const [selectedEntity, setSelectedEntity] = useState<any>(null);
-    const [showSidePanel, setShowSidePanel] = useState(false);
+    const [, setSelectedEntity] = useState<any>(null);
+    const [, setShowSidePanel] = useState(false);
     const [renderingSystem, setRenderingSystem] = useState<RenderingSystem>("instanced");
-    const [satPointsSize, setSatPointsSize] = useState(0.5);
     const [tleLoading, setTleLoading] = useState(false);
     const [occlusionCulling, setOcclusionCulling] = useState(true);
     const [globeVisible, setGlobeVisible] = useState(true);
@@ -45,6 +44,11 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [globeType, setGlobeType] = useState<GlobeType>(GlobeType.BASIC);
     const [timelineOffset, setTimelineOffset] = useState(0); // Offset from center in hours
     const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
+    const [orbitRenderingSystem, setOrbitRenderingSystem] = useState<OrbitRenderingSystem>("line");
+    const [showOrbits, setShowOrbits] = useState(false);
+    const [orbitCount, setOrbitCount] = useState(0);
+    const [orbitSize, setOrbitSize] = useState(1.0);
+    const [satelliteSize, setSatelliteSize] = useState(0.01);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -59,6 +63,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             maxSatellites: 2000000,
             renderingSystem: renderingSystem,
             globeType: globeType,
+            orbitRenderingSystem: orbitRenderingSystem,
+            maxOrbits: 1000000,
         });
 
         // Set up event handlers
@@ -139,8 +145,17 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 trailColor: color,
             });
             if (satellite) {
+                // Add orbit for this satellite
+                const orbitId = `orbit-${satellite.id}`;
+                console.log(`Adding orbit for satellite ${satellite.id} with COE:`, orbitalElements);
+                engine.addOrbit(orbitId, orbitalElements, color, 0.6, 64, orbitSize);
             }
         });
+
+        // Update orbit count and show orbits
+        setOrbitCount(engine.getOrbitCount());
+        setShowOrbits(true);
+        engine.setAllOrbitsVisible(true);
     };
 
     const addMultipleSatellites = () => {
@@ -175,17 +190,6 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         } else {
             engineRef.current.setTimeMultiplier(0);
         }
-    };
-
-    const toggleOrbits = () => {
-        if (!engineRef.current) return;
-
-        const satellites = engineRef.current.getAllSatellites();
-        satellites.forEach((satellite) => {
-            satellite.toggleOrbitVisibility();
-        });
-
-        setShowOrbits(!showOrbits);
     };
 
     const loadTLEFile = async (maxCount: number = 0) => {
@@ -279,6 +283,11 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         engineRef.current.forceUpdateMesh();
     };
 
+    const forceLoadTiles = () => {
+        if (!engineRef.current) return;
+        engineRef.current.forceLoadTiles();
+    };
+
     const handleGlobeTypeChange = (newGlobeType: GlobeType) => {
         if (!engineRef.current) return;
         setGlobeType(newGlobeType);
@@ -314,6 +323,81 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         setIsDraggingTimeline(false);
     };
 
+    const toggleOrbits = () => {
+        if (!engineRef.current) return;
+
+        const newShowOrbits = !showOrbits;
+        console.log(`Toggling orbits: ${showOrbits} -> ${newShowOrbits}`);
+        setShowOrbits(newShowOrbits);
+        engineRef.current.setAllOrbitsVisible(newShowOrbits);
+        console.log(`Orbit count: ${engineRef.current.getOrbitCount()}`);
+    };
+
+    const handleOrbitRenderingSystemChange = (newSystem: OrbitRenderingSystem) => {
+        if (!engineRef.current) return;
+
+        setOrbitRenderingSystem(newSystem);
+        engineRef.current.setOrbitRenderingSystem(newSystem);
+
+        // Preserve orbit visibility state after system change
+        if (showOrbits) {
+            engineRef.current.setAllOrbitsVisible(true);
+        }
+    };
+
+    const addOrbitForSatellite = (satellite: any) => {
+        if (!engineRef.current) return;
+
+        try {
+            const coe = satellite.getOrbitalElements();
+            if (coe && coe.semiMajorAxis > 0) {
+                const orbitId = `orbit-${satellite.id}`;
+                const color = satellite.getColor();
+                engineRef.current.addOrbit(orbitId, coe, color, 0.6, 64, orbitSize);
+                setOrbitCount(engineRef.current.getOrbitCount());
+            }
+        } catch (error) {
+            console.warn("Failed to add orbit for satellite:", error);
+        }
+    };
+
+    const addOrbitsForAllSatellites = () => {
+        if (!engineRef.current) return;
+
+        const satellites = engineRef.current.getAllSatellites();
+        satellites.forEach((satellite) => {
+            addOrbitForSatellite(satellite);
+        });
+    };
+
+    const clearAllOrbits = () => {
+        if (!engineRef.current) return;
+
+        engineRef.current.clearAllOrbits();
+        setOrbitCount(0);
+    };
+
+    const handleOrbitSizeChange = (newSize: number) => {
+        setOrbitSize(newSize);
+        // Update existing orbits with new size
+        if (engineRef.current) {
+            const satellites = engineRef.current.getAllSatellites();
+            satellites.forEach((satellite) => {
+                const orbitId = `orbit-${satellite.id}`;
+                const coe = satellite.getOrbitalElements();
+                const color = satellite.getColor();
+                engineRef.current!.addOrbit(orbitId, coe, color, 0.6, 64, newSize);
+            });
+        }
+    };
+
+    const handleSatelliteSizeChange = (newSize: number) => {
+        setSatelliteSize(newSize);
+        if (engineRef.current) {
+            engineRef.current.setSatPointsSize(newSize);
+        }
+    };
+
     return (
         <div style={{ position: "relative", width: "100%", height: "100%", ...style }} className={className}>
             {/* Globe container */}
@@ -341,18 +425,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     minWidth: "200px",
                 }}
             >
-                <div>Status: {isReady ? "Ready" : "Loading..."}</div>
                 <div>Satellites: {satelliteCount}</div>
                 <div>Time: {currentTime.toLocaleString()}</div>
-                <div>
-                    Speed: {timeMultiplier}x {isPaused ? "(Paused)" : ""}
-                </div>
-                <div>System: {renderingSystem === "satpoints" ? "SatPoints" : renderingSystem === "instanced" ? "Instanced Mesh" : "Particle System"}</div>
-                <div>Globe Type: {globeType === GlobeType.ENHANCED ? "Enhanced" : "Basic"}</div>
-                <div>Occlusion: {occlusionCulling ? "Enabled" : "Disabled"}</div>
-                <div>Globe: {globeVisible ? "Visible" : "Hidden"}</div>
-                <div>Clouds: {cloudsVisible ? "Visible" : "Hidden"}</div>
-                <div>Atmosphere: {atmosphereVisible ? "Visible" : "Hidden"}</div>
 
                 <div style={{ marginTop: "10px" }}>
                     <div style={{ marginBottom: "5px", fontWeight: "bold" }}>TLE File Controls:</div>
@@ -411,28 +485,76 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                         </button>
                     </div>
 
-                    <button onClick={toggleOrbits} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: showOrbits ? "#4CAF50" : "#666" }}>
-                        {showOrbits ? "Hide Orbits" : "Show Orbits"}
-                    </button>
-                    <div style={{ marginBottom: "10px" }}>
-                        <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Rendering System:</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                    {/* Orbit Controls */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Orbits:</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px", marginBottom: "5px" }}>
+                            <button
+                                onClick={toggleOrbits}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: showOrbits ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                {showOrbits ? "Hide" : "Show"}
+                            </button>
+                            <button
+                                onClick={addOrbitsForAllSatellites}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: "#2196F3",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                Add All
+                            </button>
+                            <button
+                                onClick={clearAllOrbits}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: "#f44336",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Rendering System */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Rendering:</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px" }}>
                             {[
-                                { value: "particle", label: "Particle System", description: "Basic particles (fallback)" },
-                                { value: "instanced", label: "Instanced Mesh", description: "High-performance instanced rendering" },
-                                { value: "satpoints", label: "SatPoints", description: "Optimized points like whatsOverHead" },
+                                { value: "particle", label: "Particle", description: "Basic" },
+                                { value: "instanced", label: "Instanced", description: "High-perf" },
+                                { value: "satpoints", label: "SatPoints", description: "Optimized" },
                             ].map((option) => (
                                 <label
                                     key={option.value}
                                     style={{
                                         display: "flex",
+                                        flexDirection: "column",
                                         alignItems: "center",
-                                        padding: "5px",
+                                        padding: "4px",
                                         cursor: "pointer",
                                         backgroundColor: renderingSystem === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
-                                        borderRadius: "3px",
+                                        borderRadius: "2px",
                                         border: renderingSystem === option.value ? "1px solid #4CAF50" : "1px solid transparent",
-                                        fontSize: "10px",
+                                        fontSize: "8px",
                                         transition: "all 0.2s ease",
                                     }}
                                 >
@@ -448,35 +570,36 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                                 engineRef.current.setRenderingSystem(newSystem);
                                             }
                                         }}
-                                        style={{ marginRight: "8px", accentColor: "#4CAF50" }}
+                                        style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
                                     />
-                                    <div>
-                                        <div style={{ fontWeight: "bold", color: renderingSystem === option.value ? "#4CAF50" : "#fff" }}>{option.label}</div>
-                                        <div style={{ fontSize: "9px", color: "#aaa", marginTop: "1px" }}>{option.description}</div>
-                                    </div>
+                                    <div style={{ fontWeight: "bold", color: renderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "8px" }}>{option.label}</div>
+                                    <div style={{ fontSize: "7px", color: "#aaa" }}>{option.description}</div>
                                 </label>
                             ))}
                         </div>
                     </div>
 
-                    <div style={{ marginTop: "10px" }}>
-                        <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Globe Type:</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                    {/* Globe Type */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Globe Type:</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px" }}>
                             {[
-                                { value: GlobeType.BASIC, label: "Basic Globe", description: "Simple globe with basic textures" },
-                                { value: GlobeType.ENHANCED, label: "Enhanced Globe", description: "High-quality globe with day/night textures" },
+                                { value: GlobeType.BASIC, label: "Basic", description: "Simple" },
+                                { value: GlobeType.ENHANCED, label: "Enhanced", description: "High-quality" },
+                                { value: GlobeType.TILE_PROVIDED, label: "Tile", description: "Map tiles" },
                             ].map((option) => (
                                 <label
                                     key={option.value}
                                     style={{
                                         display: "flex",
+                                        flexDirection: "column",
                                         alignItems: "center",
-                                        padding: "5px",
+                                        padding: "4px",
                                         cursor: "pointer",
                                         backgroundColor: globeType === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
-                                        borderRadius: "3px",
+                                        borderRadius: "2px",
                                         border: globeType === option.value ? "1px solid #4CAF50" : "1px solid transparent",
-                                        fontSize: "10px",
+                                        fontSize: "8px",
                                         transition: "all 0.2s ease",
                                     }}
                                 >
@@ -489,120 +612,320 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                             const newGlobeType = e.target.value as GlobeType;
                                             handleGlobeTypeChange(newGlobeType);
                                         }}
-                                        style={{ marginRight: "8px", accentColor: "#4CAF50" }}
+                                        style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
                                     />
-                                    <div>
-                                        <div style={{ fontWeight: "bold", color: globeType === option.value ? "#4CAF50" : "#fff" }}>{option.label}</div>
-                                        <div style={{ fontSize: "9px", color: "#aaa", marginTop: "1px" }}>{option.description}</div>
-                                    </div>
+                                    <div style={{ fontWeight: "bold", color: globeType === option.value ? "#4CAF50" : "#fff", fontSize: "8px" }}>{option.label}</div>
+                                    <div style={{ fontSize: "7px", color: "#aaa" }}>{option.description}</div>
                                 </label>
                             ))}
                         </div>
                     </div>
 
-                    {renderingSystem === "satpoints" && (
-                        <div style={{ marginTop: "5px", display: "flex", alignItems: "center", gap: "5px" }}>
-                            <label style={{ fontSize: "10px" }}>Size:</label>
-                            <input
-                                type="range"
-                                min="0.01"
-                                max="1.0"
-                                step="0.01"
-                                value={satPointsSize}
-                                onChange={(e) => {
-                                    const newSize = parseFloat(e.target.value);
-                                    setSatPointsSize(newSize);
-                                    if (engineRef.current) {
-                                        engineRef.current.setSatPointsSize(newSize);
-                                    }
-                                }}
-                                style={{ width: "60px" }}
-                            />
-                            <span style={{ fontSize: "9px" }}>{satPointsSize.toFixed(2)}</span>
+                    {/* Orbit Rendering System */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Orbit System:</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px" }}>
+                            {[
+                                { value: "line", label: "Line", description: "Traditional" },
+                                { value: "instanced", label: "Instanced", description: "GPU optimized" },
+                                { value: "shader", label: "Shader", description: "Experimental" },
+                            ].map((option) => (
+                                <label
+                                    key={option.value}
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        alignItems: "center",
+                                        padding: "4px",
+                                        cursor: "pointer",
+                                        backgroundColor: orbitRenderingSystem === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
+                                        borderRadius: "2px",
+                                        border: orbitRenderingSystem === option.value ? "1px solid #4CAF50" : "1px solid transparent",
+                                        fontSize: "8px",
+                                        transition: "all 0.2s ease",
+                                    }}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="orbitRenderingSystem"
+                                        value={option.value}
+                                        checked={orbitRenderingSystem === option.value}
+                                        onChange={(e) => {
+                                            const newSystem = e.target.value as OrbitRenderingSystem;
+                                            handleOrbitRenderingSystemChange(newSystem);
+                                        }}
+                                        style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
+                                    />
+                                    <div style={{ fontWeight: "bold", color: orbitRenderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "8px" }}>{option.label}</div>
+                                    <div style={{ fontSize: "7px", color: "#aaa" }}>{option.description}</div>
+                                </label>
+                            ))}
                         </div>
-                    )}
-                    <button onClick={toggleOcclusionCulling} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: occlusionCulling ? "#4CAF50" : "#666" }}>
-                        {occlusionCulling ? "Disable Occlusion" : "Enable Occlusion"}
-                    </button>
-                    <button onClick={toggleGlobeVisibility} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: globeVisible ? "#4CAF50" : "#666" }}>
-                        {globeVisible ? "Hide Globe" : "Show Globe"}
-                    </button>
-                    <button onClick={toggleClouds} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: cloudsVisible ? "#4CAF50" : "#666" }}>
-                        {cloudsVisible ? "Hide Clouds" : "Show Clouds"}
-                    </button>
-                    <button onClick={toggleAtmosphere} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: atmosphereVisible ? "#4CAF50" : "#666" }}>
-                        {atmosphereVisible ? "Hide Atmosphere" : "Show Atmosphere"}
-                    </button>
-                </div>
-
-                <div style={{ marginTop: "10px" }}>
-                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Mesh Update Controls:</div>
-                    <div>Mesh Updates: {meshUpdatesEnabled ? "Enabled" : "Disabled"}</div>
-                    <button
-                        onClick={toggleMeshUpdates}
-                        style={{
-                            margin: "2px",
-                            padding: "5px",
-                            fontSize: "10px",
-                            backgroundColor: meshUpdatesEnabled ? "#4CAF50" : "#F44336",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "3px",
-                            cursor: "pointer",
-                        }}
-                    >
-                        {meshUpdatesEnabled ? "Disable Mesh Updates" : "Enable Mesh Updates"}
-                    </button>
-                    <button
-                        onClick={forceUpdateMesh}
-                        disabled={meshUpdatesEnabled}
-                        style={{
-                            margin: "2px",
-                            padding: "5px",
-                            fontSize: "10px",
-                            backgroundColor: meshUpdatesEnabled ? "#666" : "#FF9800",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "3px",
-                            cursor: meshUpdatesEnabled ? "not-allowed" : "pointer",
-                        }}
-                    >
-                        Update Mesh Now
-                    </button>
-                    <div style={{ fontSize: "9px", color: "#888", marginTop: "5px" }}>Tip: Disable mesh updates before adding many satellites, then click "Update Mesh Now"</div>
-                </div>
-
-                <div style={{ marginTop: "10px" }}>
-                    <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Time Controls:</div>
-                    <button onClick={togglePause} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: isPaused ? "#4CAF50" : "#f44336" }}>
-                        {isPaused ? "Play" : "Pause"}
-                    </button>
-                </div>
-
-                <div style={{ marginTop: "10px", display: "flex", gap: "20px" }}>
-                    <div style={{ flex: 1 }}>
-                        <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Speed:</div>
-                        <button onClick={() => handleSetTimeMultiplier(1)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                            1x
-                        </button>
-                        <button onClick={() => handleSetTimeMultiplier(10)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                            10x
-                        </button>
-                        <button onClick={() => handleSetTimeMultiplier(100)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                            100x
-                        </button>
-                        <button onClick={() => handleSetTimeMultiplier(1000)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                            1000x
-                        </button>
-                        <button onClick={() => handleSetTimeMultiplier(10000)} style={{ margin: "2px", padding: "5px", fontSize: "10px" }}>
-                            10000x
-                        </button>
                     </div>
 
-                    <div style={{ flex: 2 }}>
-                        <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Timeline:</div>
+                    {/* Size Controls */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Size Controls:</div>
+
+                        {/* Satellite Size */}
+                        <div style={{ marginBottom: "5px" }}>
+                            <div style={{ fontSize: "8px", marginBottom: "2px" }}>Satellites:</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                                <input
+                                    type="range"
+                                    min="0.001"
+                                    max="0.1"
+                                    step="0.001"
+                                    value={satelliteSize}
+                                    onChange={(e) => {
+                                        const newSize = parseFloat(e.target.value);
+                                        handleSatelliteSizeChange(newSize);
+                                    }}
+                                    style={{ flex: 1, height: "4px" }}
+                                />
+                                <span style={{ fontSize: "8px", minWidth: "30px" }}>{satelliteSize.toFixed(3)}</span>
+                            </div>
+                        </div>
+
+                        {/* Orbit Size */}
+                        <div style={{ marginBottom: "5px" }}>
+                            <div style={{ fontSize: "8px", marginBottom: "2px" }}>Orbits:</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                                <input
+                                    type="range"
+                                    min="0.1"
+                                    max="5.0"
+                                    step="0.1"
+                                    value={orbitSize}
+                                    onChange={(e) => {
+                                        const newSize = parseFloat(e.target.value);
+                                        handleOrbitSizeChange(newSize);
+                                    }}
+                                    style={{ flex: 1, height: "4px" }}
+                                />
+                                <span style={{ fontSize: "8px", minWidth: "30px" }}>{orbitSize.toFixed(1)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Toggle Controls */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Toggles:</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px" }}>
+                            <button
+                                onClick={toggleOcclusionCulling}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: occlusionCulling ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                Occlusion: {occlusionCulling ? "On" : "Off"}
+                            </button>
+                            <button
+                                onClick={toggleGlobeVisibility}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: globeVisible ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                Globe: {globeVisible ? "On" : "Off"}
+                            </button>
+                            <button
+                                onClick={toggleClouds}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: cloudsVisible ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                Clouds: {cloudsVisible ? "On" : "Off"}
+                            </button>
+                            <button
+                                onClick={toggleAtmosphere}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: atmosphereVisible ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                Atmosphere: {atmosphereVisible ? "On" : "Off"}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Mesh Update Controls */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Mesh Updates:</div>
+                        <div style={{ display: "flex", gap: "3px", marginBottom: "3px" }}>
+                            <button
+                                onClick={toggleMeshUpdates}
+                                style={{
+                                    flex: 1,
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: meshUpdatesEnabled ? "#4CAF50" : "#F44336",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                {meshUpdatesEnabled ? "Disable" : "Enable"}
+                            </button>
+                            <button
+                                onClick={forceUpdateMesh}
+                                disabled={meshUpdatesEnabled}
+                                style={{
+                                    flex: 1,
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: meshUpdatesEnabled ? "#666" : "#FF9800",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: meshUpdatesEnabled ? "not-allowed" : "pointer",
+                                }}
+                            >
+                                Update Now
+                            </button>
+                            <button
+                                onClick={forceLoadTiles}
+                                style={{
+                                    flex: 1,
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: "#9C27B0",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                Load Tiles
+                            </button>
+                        </div>
+                        <div style={{ fontSize: "7px", color: "#888" }}>💡 Disable before adding many satellites</div>
+                    </div>
+
+                    {/* Time Controls */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Time:</div>
+                        <div style={{ display: "flex", gap: "3px", marginBottom: "5px" }}>
+                            <button
+                                onClick={togglePause}
+                                style={{
+                                    flex: 1,
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: isPaused ? "#4CAF50" : "#f44336",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                {isPaused ? "Play" : "Pause"}
+                            </button>
+                        </div>
+
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Speed:</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "3px" }}>
+                            <button
+                                onClick={() => handleSetTimeMultiplier(1)}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: timeMultiplier === 1 ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                1x
+                            </button>
+                            <button
+                                onClick={() => handleSetTimeMultiplier(10)}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: timeMultiplier === 10 ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                10x
+                            </button>
+                            <button
+                                onClick={() => handleSetTimeMultiplier(100)}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: timeMultiplier === 100 ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                100x
+                            </button>
+                            <button
+                                onClick={() => handleSetTimeMultiplier(1000)}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: timeMultiplier === 1000 ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                1Kx
+                            </button>
+                            <button
+                                onClick={() => handleSetTimeMultiplier(10000)}
+                                style={{
+                                    padding: "3px 6px",
+                                    fontSize: "8px",
+                                    backgroundColor: timeMultiplier === 10000 ? "#4CAF50" : "#666",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                10Kx
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Timeline */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "9px" }}>Timeline:</div>
                         <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "5px" }}>
-                            <div style={{ fontSize: "9px", color: "#aaa", minWidth: "80px" }}>
+                            <div style={{ fontSize: "8px", color: "#aaa", minWidth: "60px" }}>
                                 {(() => {
                                     const now = new Date();
                                     const currentTime = new Date(now.getTime() + timelineOffset * 60 * 60 * 1000);
@@ -612,20 +935,19 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             <button
                                 onClick={resetTimelineToNow}
                                 style={{
-                                    margin: "2px",
-                                    padding: "3px 8px",
-                                    fontSize: "9px",
+                                    padding: "2px 6px",
+                                    fontSize: "7px",
                                     backgroundColor: "#4CAF50",
                                     color: "white",
                                     border: "none",
-                                    borderRadius: "3px",
+                                    borderRadius: "2px",
                                     cursor: "pointer",
                                 }}
                             >
-                                Reset to Now
+                                Reset
                             </button>
                         </div>
-                        <div style={{ position: "relative", marginBottom: "5px", padding: "0 10px" }}>
+                        <div style={{ position: "relative", marginBottom: "5px", padding: "0 5px" }}>
                             <input
                                 type="range"
                                 min="-1"
@@ -637,10 +959,10 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 onMouseUp={handleTimelineMouseUp}
                                 style={{
                                     width: "100%",
-                                    height: "20px",
+                                    height: "15px",
                                     background: "linear-gradient(to right, #333 0%, #4CAF50 50%, #333 100%)",
                                     outline: "none",
-                                    borderRadius: "10px",
+                                    borderRadius: "8px",
                                     cursor: isDraggingTimeline ? "grabbing" : "grab",
                                     WebkitAppearance: "none",
                                     appearance: "none",
@@ -649,17 +971,15 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             {/* Tick marks */}
                             {[-24, -12, -6, -3, 0, 3, 6, 12, 24].map((hour) => {
                                 const position = (hour + 24) / 48; // Convert to 0-1 range
-                                const time = new Date();
-                                time.setHours(time.getHours() + hour);
                                 return (
                                     <div
                                         key={hour}
                                         style={{
                                             position: "absolute",
-                                            top: "25px",
+                                            top: "18px",
                                             left: `${position * 100}%`,
                                             transform: "translateX(-50%)",
-                                            fontSize: "7px",
+                                            fontSize: "6px",
                                             color: hour === 0 ? "#4CAF50" : "#aaa",
                                             fontWeight: hour === 0 ? "bold" : "normal",
                                         }}
@@ -669,145 +989,119 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                 );
                             })}
                         </div>
-                        <div style={{ fontSize: "9px", color: "#888", marginTop: "5px" }}>💡 Drag anywhere on the timeline to scrub through time</div>
+                        <div style={{ fontSize: "7px", color: "#888" }}>💡 Drag to scrub through time</div>
                     </div>
                 </div>
+
+                {/* Satellite Locations Display - Commented out for space */}
+
+                {/* Side Panel for Selected Entity */}
+                {/* {showSidePanel && selectedEntity && (
+                    <div
+                        style={{
+                            position: "absolute",
+                            top: "10px",
+                            right: "10px",
+                            background: "rgba(0, 0, 0, 0.9)",
+                            color: "white",
+                            padding: "15px",
+                            borderRadius: "8px",
+                            fontFamily: "monospace",
+                            fontSize: "12px",
+                            minWidth: "300px",
+                            maxWidth: "400px",
+                            maxHeight: "80vh",
+                            overflow: "auto",
+                            border: "2px solid #4CAF50",
+                            zIndex: 1000,
+                        }}
+                    >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                            <h3 style={{ margin: 0, color: "#4CAF50" }}>Satellite Details</h3>
+                            <button
+                                onClick={() => {
+                                    if (engineRef.current) {
+                                        engineRef.current.deselectEntity();
+                                    }
+                                }}
+                                style={{
+                                    background: "#f44336",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "3px",
+                                    padding: "5px 10px",
+                                    cursor: "pointer",
+                                    fontSize: "10px",
+                                }}
+                            >
+                                ✕ Close
+                            </button>
+                        </div>
+
+                        <div style={{ marginBottom: "10px" }}>
+                            <strong>Name:</strong> {selectedEntity.name}
+                        </div>
+
+                        <div style={{ marginBottom: "10px" }}>
+                            <strong>ID:</strong> {selectedEntity.id}
+                        </div>
+
+                        {selectedEntity.getCurrentLocation && (
+                            <div style={{ marginBottom: "10px" }}>
+                                <strong>Current Position:</strong>
+                                {(() => {
+                                    try {
+                                        const location = selectedEntity.getCurrentLocation();
+                                        return location &&
+                                            typeof location.latitude === "number" &&
+                                            typeof location.longitude === "number" &&
+                                            typeof location.altitude === "number" ? (
+                                            <div style={{ marginLeft: "10px", fontSize: "11px" }}>
+                                                <div>Lat: {location.latitude.toFixed(4)}°</div>
+                                                <div>Lon: {location.longitude.toFixed(4)}°</div>
+                                                <div>Alt: {location.altitude.toFixed(2)} km</div>
+                                            </div>
+                                        ) : (
+                                            <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Position not available</div>
+                                        );
+                                    } catch (error) {
+                                        return <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Error getting position</div>;
+                                    }
+                                })()}
+                            </div>
+                        )}
+
+                        {selectedEntity.getOrbitalElements && (
+                            <div style={{ marginBottom: "10px" }}>
+                                <strong>Orbital Elements:</strong>
+                                {(() => {
+                                    try {
+                                        const coe = selectedEntity.getOrbitalElements();
+                                        return coe ? (
+                                            <div style={{ marginLeft: "10px", fontSize: "11px" }}>
+                                                <div>Inclination: {coe.inclination ? ((coe.inclination * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
+                                                <div>RAAN: {coe.rightAscension ? ((coe.rightAscension * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
+                                                <div>Eccentricity: {coe.eccentricity ? coe.eccentricity.toFixed(6) : "N/A"}</div>
+                                                <div>Argument of perigee: {coe.argumentOfPerigee ? ((coe.argumentOfPerigee * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
+                                                <div>Mean anomaly: {coe.meanAnomaly ? ((coe.meanAnomaly * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
+                                                <div>Mean motion: {coe.meanMotion ? coe.meanMotion.toFixed(8) : "N/A"} rev/day</div>
+                                            </div>
+                                        ) : (
+                                            <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Orbital elements not available</div>
+                                        );
+                                    } catch (error) {
+                                        return <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Error getting orbital elements</div>;
+                                    }
+                                })()}
+                            </div>
+                        )}
+
+                        <div style={{ marginTop: "15px", padding: "10px", background: "rgba(76, 175, 80, 0.1)", borderRadius: "5px" }}>
+                            <div style={{ fontSize: "11px", color: "#4CAF50" }}>💡 Click anywhere on the screen to deselect</div>
+                        </div>
+                    </div>
+                )} */}
             </div>
-
-            {/* Satellite Locations Display */}
-            {/* {Object.keys(satelliteLocations).length > 0 && (
-                <div style={{
-                    position: 'absolute',
-                    top: '10px',
-                    right: '10px',
-                    background: 'rgba(0, 0, 0, 0.8)',
-                    color: 'white',
-                    padding: '10px',
-                    borderRadius: '5px',
-                    fontFamily: 'monospace',
-                    fontSize: '10px',
-                    maxWidth: '200px',
-                    maxHeight: '300px',
-                    overflow: 'auto'
-                }}>
-                    <h4 style={{ margin: '0 0 10px 0', fontSize: '12px' }}>Satellite Locations:</h4>
-                    {Object.entries(satelliteLocations).map(([id, location]) => (
-                        <div key={id} style={{ marginBottom: '8px', padding: '5px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '3px' }}>
-                            <strong>Sat {id.slice(-4)}:</strong>
-                            <br />
-                            Lat: {location.latitude.toFixed(2)}°
-                            <br />
-                            Lon: {location.longitude.toFixed(2)}°
-                            <br />
-                            Alt: {location.altitude.toFixed(2)} km
-                        </div>
-                    ))}
-                </div>
-            )} */}
-
-            {/* Side Panel for Selected Entity */}
-            {showSidePanel && selectedEntity && (
-                <div
-                    style={{
-                        position: "absolute",
-                        top: "10px",
-                        right: "10px",
-                        background: "rgba(0, 0, 0, 0.9)",
-                        color: "white",
-                        padding: "15px",
-                        borderRadius: "8px",
-                        fontFamily: "monospace",
-                        fontSize: "12px",
-                        minWidth: "300px",
-                        maxWidth: "400px",
-                        maxHeight: "80vh",
-                        overflow: "auto",
-                        border: "2px solid #4CAF50",
-                        zIndex: 1000,
-                    }}
-                >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                        <h3 style={{ margin: 0, color: "#4CAF50" }}>Satellite Details</h3>
-                        <button
-                            onClick={() => {
-                                if (engineRef.current) {
-                                    engineRef.current.deselectEntity();
-                                }
-                            }}
-                            style={{
-                                background: "#f44336",
-                                color: "white",
-                                border: "none",
-                                borderRadius: "3px",
-                                padding: "5px 10px",
-                                cursor: "pointer",
-                                fontSize: "10px",
-                            }}
-                        >
-                            ✕ Close
-                        </button>
-                    </div>
-
-                    <div style={{ marginBottom: "10px" }}>
-                        <strong>Name:</strong> {selectedEntity.name}
-                    </div>
-
-                    <div style={{ marginBottom: "10px" }}>
-                        <strong>ID:</strong> {selectedEntity.id}
-                    </div>
-
-                    {selectedEntity.getCurrentLocation && (
-                        <div style={{ marginBottom: "10px" }}>
-                            <strong>Current Position:</strong>
-                            {(() => {
-                                try {
-                                    const location = selectedEntity.getCurrentLocation();
-                                    return location && typeof location.latitude === "number" && typeof location.longitude === "number" && typeof location.altitude === "number" ? (
-                                        <div style={{ marginLeft: "10px", fontSize: "11px" }}>
-                                            <div>Lat: {location.latitude.toFixed(4)}°</div>
-                                            <div>Lon: {location.longitude.toFixed(4)}°</div>
-                                            <div>Alt: {location.altitude.toFixed(2)} km</div>
-                                        </div>
-                                    ) : (
-                                        <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Position not available</div>
-                                    );
-                                } catch (error) {
-                                    return <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Error getting position</div>;
-                                }
-                            })()}
-                        </div>
-                    )}
-
-                    {selectedEntity.getOrbitalElements && (
-                        <div style={{ marginBottom: "10px" }}>
-                            <strong>Orbital Elements:</strong>
-                            {(() => {
-                                try {
-                                    const coe = selectedEntity.getOrbitalElements();
-                                    return coe ? (
-                                        <div style={{ marginLeft: "10px", fontSize: "11px" }}>
-                                            <div>Inclination: {coe.inclination ? ((coe.inclination * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
-                                            <div>RAAN: {coe.rightAscension ? ((coe.rightAscension * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
-                                            <div>Eccentricity: {coe.eccentricity ? coe.eccentricity.toFixed(6) : "N/A"}</div>
-                                            <div>Argument of perigee: {coe.argumentOfPerigee ? ((coe.argumentOfPerigee * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
-                                            <div>Mean anomaly: {coe.meanAnomaly ? ((coe.meanAnomaly * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
-                                            <div>Mean motion: {coe.meanMotion ? coe.meanMotion.toFixed(8) : "N/A"} rev/day</div>
-                                        </div>
-                                    ) : (
-                                        <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Orbital elements not available</div>
-                                    );
-                                } catch (error) {
-                                    return <div style={{ marginLeft: "10px", fontSize: "11px", color: "#ff9800" }}>Error getting orbital elements</div>;
-                                }
-                            })()}
-                        </div>
-                    )}
-
-                    <div style={{ marginTop: "15px", padding: "10px", background: "rgba(76, 175, 80, 0.1)", borderRadius: "5px" }}>
-                        <div style={{ fontSize: "11px", color: "#4CAF50" }}>💡 Click anywhere on the screen to deselect</div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
