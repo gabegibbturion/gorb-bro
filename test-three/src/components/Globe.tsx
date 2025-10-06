@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { GlobeEngine } from "../engine/GlobeEngine";
 import type { ClassicalOrbitalElements } from "../engine/OrbitalElements";
 import { OrbitalElementsGenerator } from "../engine/OrbitalElements";
+import type { RenderingSystem } from "../engine/EntityManager";
 
 interface GlobeProps {
     style?: React.CSSProperties;
@@ -33,8 +34,8 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [satelliteCountInput, setSatelliteCountInput] = useState<any>(100);
     const [selectedEntity, setSelectedEntity] = useState<any>(null);
     const [showSidePanel, setShowSidePanel] = useState(false);
-    const [useInstancedMesh, setUseInstancedMesh] = useState(false);
-    const [useWebGPURendering, setUseWebGPURendering] = useState(false);
+    const [renderingSystem, setRenderingSystem] = useState<RenderingSystem>("instanced");
+    const [satPointsSize, setSatPointsSize] = useState(0.5);
     const [tleLoading, setTleLoading] = useState(false);
     const [occlusionCulling, setOcclusionCulling] = useState(true);
     const [globeVisible, setGlobeVisible] = useState(true);
@@ -53,7 +54,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             autoRotate: false, // Disable auto-rotation
             rotationSpeed: 0.0005,
             maxSatellites: 2000000,
-            useInstancedMesh: useInstancedMesh,
+            renderingSystem: renderingSystem,
         });
 
         // Set up event handlers
@@ -233,19 +234,6 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         engineRef.current.setGlobeVisible(newValue);
     };
 
-    const toggleGPURendering = () => {
-        if (!engineRef.current) return;
-        const newValue = !useWebGPURendering;
-        setUseWebGPURendering(newValue);
-        engineRef.current.setUseWebGPURendering(newValue);
-
-        // Show WebGPU support info
-        const supportInfo = engineRef.current.getEntityManager().getWebGPUSupportInfo();
-        if (!supportInfo.supported) {
-            console.warn("WebGPU not supported:", supportInfo.reason);
-        }
-    };
-
     const toggleClouds = () => {
         if (!engineRef.current) return;
         const enhancedGlobe = engineRef.current.getEnhancedGlobe();
@@ -311,10 +299,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 <div>
                     Speed: {timeMultiplier}x {isPaused ? "(Paused)" : ""}
                 </div>
-                <div>System: {useWebGPURendering ? "WebGPU Rendering" : useInstancedMesh ? "Instanced Mesh" : "Particle System"}</div>
-                {useWebGPURendering && (
-                    <div style={{ fontSize: "10px", color: "#ff9800" }}>WebGPU: {engineRef.current?.getSystemInfo().webgpuReady ? "Ready" : "Not Available"}</div>
-                )}
+                <div>System: {renderingSystem === "satpoints" ? "SatPoints" : renderingSystem === "instanced" ? "Instanced Mesh" : "Particle System"}</div>
                 <div>Occlusion: {occlusionCulling ? "Enabled" : "Disabled"}</div>
                 <div>Globe: {globeVisible ? "Visible" : "Hidden"}</div>
                 <div>Clouds: {cloudsVisible ? "Visible" : "Hidden"}</div>
@@ -380,26 +365,76 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                     <button onClick={toggleOrbits} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: showOrbits ? "#4CAF50" : "#666" }}>
                         {showOrbits ? "Hide Orbits" : "Show Orbits"}
                     </button>
-                    <button
-                        onClick={() => {
-                            const newValue = !useInstancedMesh;
-                            setUseInstancedMesh(newValue);
-                            if (engineRef.current) {
-                                engineRef.current.setUseInstancedMesh(newValue);
-                            }
-                        }}
-                        style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: useInstancedMesh ? "#4CAF50" : "#2196F3" }}
-                    >
-                        {useInstancedMesh ? "Use Particle System" : "Use Instanced Mesh"}
-                    </button>
+                    <div style={{ marginBottom: "10px" }}>
+                        <div style={{ marginBottom: "5px", fontWeight: "bold" }}>Rendering System:</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                            {[
+                                { value: "particle", label: "Particle System", description: "Basic particles (fallback)" },
+                                { value: "instanced", label: "Instanced Mesh", description: "High-performance instanced rendering" },
+                                { value: "satpoints", label: "SatPoints", description: "Optimized points like whatsOverHead" },
+                            ].map((option) => (
+                                <label
+                                    key={option.value}
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        padding: "5px",
+                                        cursor: "pointer",
+                                        backgroundColor: renderingSystem === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
+                                        borderRadius: "3px",
+                                        border: renderingSystem === option.value ? "1px solid #4CAF50" : "1px solid transparent",
+                                        fontSize: "10px",
+                                        transition: "all 0.2s ease",
+                                    }}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="renderingSystem"
+                                        value={option.value}
+                                        checked={renderingSystem === option.value}
+                                        onChange={(e) => {
+                                            const newSystem = e.target.value as RenderingSystem;
+                                            setRenderingSystem(newSystem);
+                                            if (engineRef.current) {
+                                                engineRef.current.setRenderingSystem(newSystem);
+                                            }
+                                        }}
+                                        style={{ marginRight: "8px", accentColor: "#4CAF50" }}
+                                    />
+                                    <div>
+                                        <div style={{ fontWeight: "bold", color: renderingSystem === option.value ? "#4CAF50" : "#fff" }}>{option.label}</div>
+                                        <div style={{ fontSize: "9px", color: "#aaa", marginTop: "1px" }}>{option.description}</div>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+                    {renderingSystem === "satpoints" && (
+                        <div style={{ marginTop: "5px", display: "flex", alignItems: "center", gap: "5px" }}>
+                            <label style={{ fontSize: "10px" }}>Size:</label>
+                            <input
+                                type="range"
+                                min="0.01"
+                                max="1.0"
+                                step="0.01"
+                                value={satPointsSize}
+                                onChange={(e) => {
+                                    const newSize = parseFloat(e.target.value);
+                                    setSatPointsSize(newSize);
+                                    if (engineRef.current) {
+                                        engineRef.current.setSatPointsSize(newSize);
+                                    }
+                                }}
+                                style={{ width: "60px" }}
+                            />
+                            <span style={{ fontSize: "9px" }}>{satPointsSize.toFixed(2)}</span>
+                        </div>
+                    )}
                     <button onClick={toggleOcclusionCulling} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: occlusionCulling ? "#4CAF50" : "#666" }}>
                         {occlusionCulling ? "Disable Occlusion" : "Enable Occlusion"}
                     </button>
                     <button onClick={toggleGlobeVisibility} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: globeVisible ? "#4CAF50" : "#666" }}>
                         {globeVisible ? "Hide Globe" : "Show Globe"}
-                    </button>
-                    <button onClick={toggleGPURendering} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: useWebGPURendering ? "#4CAF50" : "#2196F3" }}>
-                        {useWebGPURendering ? "Disable WebGPU" : "Enable WebGPU"}
                     </button>
                     <button onClick={toggleClouds} style={{ margin: "2px", padding: "5px", fontSize: "10px", backgroundColor: cloudsVisible ? "#4CAF50" : "#666" }}>
                         {cloudsVisible ? "Hide Clouds" : "Show Clouds"}

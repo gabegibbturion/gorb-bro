@@ -2,8 +2,8 @@ import { Route, Routes } from "react-router-dom";
 import "./App.css";
 import Navigation from "./components/Navigation";
 import GlobePage from "./pages/GlobePage";
-import HomePage from "./pages/HomePage";
 import ParticlesPage from "./pages/ParticlesPage";
+import HomePage from "./pages/HomePage";
 
 function App() {
     return (
@@ -14,6 +14,7 @@ function App() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/globe" element={<GlobePage />} />
                 <Route path="/particles" element={<ParticlesPage />} />
+                <Route path="*" element={<GlobePage />} />
             </Routes>
         </div>
     );

@@ -16,7 +16,7 @@ export interface EnhancedGlobeOptions {
 
 /**
  * EnhancedGlobe - A high-quality Earth globe with advanced rendering features
- * 
+ *
  * Features:
  * - High-resolution textures (day, night, clouds, ocean, bump maps)
  * - Atmospheric scattering effects
@@ -44,8 +44,8 @@ export class EnhancedGlobe {
             atmMultiplier: 9.5,
             enableClouds: true,
             enableAtmosphere: true,
-            enableNightLights: false,      // Disabled by default (requires shader mods)
-            enableCloudShadows: false,     // Disabled by default (requires shader mods)
+            enableNightLights: true, // Enabled for day/night texture switching
+            enableCloudShadows: true, // Enabled for cloud shadows
             ...options,
         };
 
@@ -103,11 +103,11 @@ export class EnhancedGlobe {
                 (error) => {
                     console.warn(`Failed to load texture ${path}, using fallback`, error);
                     // Create a simple colored texture as fallback
-                    const canvas = document.createElement('canvas');
+                    const canvas = document.createElement("canvas");
                     canvas.width = 2;
                     canvas.height = 2;
-                    const ctx = canvas.getContext('2d')!;
-                    ctx.fillStyle = '#888888';
+                    const ctx = canvas.getContext("2d")!;
+                    ctx.fillStyle = "#888888";
                     ctx.fillRect(0, 0, 2, 2);
                     const fallbackTexture = new THREE.CanvasTexture(canvas);
                     resolve(fallbackTexture);
@@ -116,13 +116,7 @@ export class EnhancedGlobe {
         });
     }
 
-    private createEarth(
-        albedoMap: THREE.Texture,
-        bumpMap: THREE.Texture,
-        oceanMap: THREE.Texture,
-        lightsMap: THREE.Texture,
-        cloudsMap: THREE.Texture
-    ): void {
+    private createEarth(albedoMap: THREE.Texture, bumpMap: THREE.Texture, oceanMap: THREE.Texture, lightsMap: THREE.Texture, cloudsMap: THREE.Texture): void {
         const earthGeo = new THREE.SphereGeometry(this.options.radius, 64, 64);
 
         // Create a simple, reliable material that works across all Three.js versions
@@ -137,28 +131,25 @@ export class EnhancedGlobe {
         });
 
         this.earth = new THREE.Mesh(earthGeo, earthMat);
+        this.earth.receiveShadow = true;
+        this.earth.castShadow = true;
         this.group.add(this.earth);
 
-        // Shader modifications disabled for compatibility with newer Three.js versions
-        // The material will work fine without them, just without advanced features
-        // If you want to enable them, uncomment the code below and test with your Three.js version
-
-        // Apply custom shader modifications for cloud shadows and night lights
-        // if (this.options.enableCloudShadows || this.options.enableNightLights) {
-        //     try {
-        //         this.modifyEarthShader(earthMat, cloudsMap);
-        //     } catch (error) {
-        //         console.warn('Failed to apply shader modifications, using basic material:', error);
-        //     }
-        // }
+        // Apply custom shader modifications for day/night texture switching
+        try {
+            this.modifyEarthShader(earthMat, cloudsMap, lightsMap);
+        } catch (error) {
+            console.warn("Failed to apply shader modifications, using basic material:", error);
+        }
     }
 
-    private modifyEarthShader(material: THREE.MeshStandardMaterial, cloudsMap: THREE.Texture): void {
+    private modifyEarthShader(material: THREE.MeshStandardMaterial, cloudsMap: THREE.Texture, lightsMap: THREE.Texture): void {
         cloudsMap.wrapS = THREE.RepeatWrapping;
 
         material.onBeforeCompile = (shader) => {
             try {
                 shader.uniforms.tClouds = { value: cloudsMap };
+                shader.uniforms.tNightLights = { value: lightsMap };
                 shader.uniforms.uv_xOffset = { value: 0 };
 
                 // Add uniforms to common section
@@ -168,6 +159,7 @@ export class EnhancedGlobe {
                         `
                         #include <common>
                         uniform sampler2D tClouds;
+                        uniform sampler2D tNightLights;
                         uniform float uv_xOffset;
                         `
                     );
@@ -216,57 +208,94 @@ export class EnhancedGlobe {
                     );
                 }
 
-                // Add cloud shadows and atmospheric effects
-                if (this.options.enableCloudShadows || this.options.enableNightLights) {
-                    // Try to insert before colorspace_fragment (newer Three.js)
-                    if (shader.fragmentShader.includes("#include <colorspace_fragment>")) {
-                        shader.fragmentShader = shader.fragmentShader.replace(
-                            "#include <colorspace_fragment>",
-                            `
-                            ${this.options.enableCloudShadows ? `
-                            // Cloud shadows implementation
-                            float cloudsMapValue = texture2D(tClouds, vec2(vMapUv.x - uv_xOffset, vMapUv.y)).r;
+                // Add day/night texture switching and atmospheric effects
+                if (shader.fragmentShader.includes("#include <colorspace_fragment>")) {
+                    shader.fragmentShader = shader.fragmentShader.replace(
+                        "#include <colorspace_fragment>",
+                        `
+                        // Day/Night texture switching based on sun direction
+                        vec3 surfaceNormal = normalize(vNormal);
+                        
+                        // Get direction to sun from the first directional light
+                        #if NUM_DIR_LIGHTS > 0
+                            vec3 sunDirection = directionalLights[0].direction;
+                            float dayNightFactor = dot(surfaceNormal, sunDirection);
                             
-                            // Darken areas under clouds (clamp to minimum 0.2 to avoid too dark shadows)
-                            gl_FragColor.rgb *= max(1.0 - cloudsMapValue, 0.2);
-                            ` : ''}
-
-                            // Add atmospheric coloring around the edges
-                            vec3 surfaceNormal = normalize(vNormal);
-                            float intensity = 1.4 - dot(surfaceNormal, vec3(0.0, 0.0, 1.0));
-                            vec3 atmosphere = vec3(0.3, 0.6, 1.0) * pow(intensity, 5.0);
-                            gl_FragColor.rgb += atmosphere * 0.3;
-
-                            #include <colorspace_fragment>
-                            `
-                        );
-                    } else if (shader.fragmentShader.includes("#include <tonemapping_fragment>")) {
-                        // Fallback for older Three.js versions
-                        shader.fragmentShader = shader.fragmentShader.replace(
-                            "#include <tonemapping_fragment>",
-                            `
-                            #include <tonemapping_fragment>
+                            // Mix between day and night textures based on sun direction
+                            vec4 dayTexture = gl_FragColor;
+                            vec4 nightTexture = texture2D(tNightLights, vMapUv);
                             
-                            ${this.options.enableCloudShadows ? `
-                            // Cloud shadows implementation
-                            float cloudsMapValue = texture2D(tClouds, vec2(vMapUv.x - uv_xOffset, vMapUv.y)).r;
-                            gl_FragColor.rgb *= max(1.0 - cloudsMapValue, 0.2);
-                            ` : ''}
+                            // Smooth transition between day and night
+                            float nightFactor = smoothstep(-0.1, 0.1, dayNightFactor);
+                            gl_FragColor = mix(nightTexture, dayTexture, nightFactor);
+                        #endif
 
-                            // Add atmospheric coloring
-                            vec3 surfaceNormal = normalize(vNormal);
-                            float intensity = 1.4 - dot(surfaceNormal, vec3(0.0, 0.0, 1.0));
-                            vec3 atmosphere = vec3(0.3, 0.6, 1.0) * pow(intensity, 5.0);
-                            gl_FragColor.rgb += atmosphere * 0.3;
-                            `
-                        );
-                    }
+                        ${
+                            this.options.enableCloudShadows
+                                ? `
+                        // Cloud shadows implementation
+                        float cloudsMapValue = texture2D(tClouds, vec2(vMapUv.x - uv_xOffset, vMapUv.y)).r;
+                        
+                        // Darken areas under clouds (clamp to minimum 0.2 to avoid too dark shadows)
+                        gl_FragColor.rgb *= max(1.0 - cloudsMapValue, 0.2);
+                        `
+                                : ""
+                        }
+
+                        // Add atmospheric coloring around the edges
+                        float intensity = 1.4 - dot(surfaceNormal, vec3(0.0, 0.0, 1.0));
+                        vec3 atmosphere = vec3(0.3, 0.6, 1.0) * pow(intensity, 5.0);
+                        gl_FragColor.rgb += atmosphere * 0.3;
+
+                        #include <colorspace_fragment>
+                        `
+                    );
+                } else if (shader.fragmentShader.includes("#include <tonemapping_fragment>")) {
+                    // Fallback for older Three.js versions
+                    shader.fragmentShader = shader.fragmentShader.replace(
+                        "#include <tonemapping_fragment>",
+                        `
+                        // Day/Night texture switching based on sun direction
+                        vec3 surfaceNormal = normalize(vNormal);
+                        
+                        // Get direction to sun from the first directional light
+                        #if NUM_DIR_LIGHTS > 0
+                            vec3 sunDirection = directionalLights[0].direction;
+                            float dayNightFactor = dot(surfaceNormal, sunDirection);
+                            
+                            // Mix between day and night textures based on sun direction
+                            vec4 dayTexture = gl_FragColor;
+                            vec4 nightTexture = texture2D(tNightLights, vMapUv);
+                            
+                            // Smooth transition between day and night
+                            float nightFactor = smoothstep(-0.1, 0.1, dayNightFactor);
+                            gl_FragColor = mix(nightTexture, dayTexture, nightFactor);
+                        #endif
+
+                        ${
+                            this.options.enableCloudShadows
+                                ? `
+                        // Cloud shadows implementation
+                        float cloudsMapValue = texture2D(tClouds, vec2(vMapUv.x - uv_xOffset, vMapUv.y)).r;
+                        gl_FragColor.rgb *= max(1.0 - cloudsMapValue, 0.2);
+                        `
+                                : ""
+                        }
+
+                        // Add atmospheric coloring
+                        float intensity = 1.4 - dot(surfaceNormal, vec3(0.0, 0.0, 1.0));
+                        vec3 atmosphere = vec3(0.3, 0.6, 1.0) * pow(intensity, 5.0);
+                        gl_FragColor.rgb += atmosphere * 0.3;
+
+                        #include <tonemapping_fragment>
+                        `
+                    );
                 }
 
                 // Save shader reference for dynamic updates
                 material.userData.shader = shader;
             } catch (error) {
-                console.error('Error modifying shader:', error);
+                console.error("Error modifying shader:", error);
                 throw error;
             }
         };
@@ -476,4 +505,3 @@ export class EnhancedGlobe {
         }
     }
 }
-

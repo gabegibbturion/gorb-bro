@@ -3,16 +3,17 @@ import type { OrbitalElements } from "./OrbitalElements";
 import { OrbitalElementsGenerator } from "./OrbitalElements";
 import type { SatelliteEntityOptions } from "./SatelliteEntity";
 import { SatelliteEntity } from "./SatelliteEntity";
-import { WebGPUSatelliteRenderer, type WebGPUSatelliteRendererOptions } from "./WebGPUSatelliteRenderer";
+import { SatPoints } from "./SatPoints";
+
+export type RenderingSystem = "particle" | "instanced" | "satpoints";
 
 export interface EntityManagerOptions {
     maxSatellites?: number;
     autoCleanup?: boolean;
     updateInterval?: number;
-    useInstancedMesh?: boolean; // Toggle between particle system and instanced mesh
-    useWebGPURendering?: boolean; // Toggle WebGPU-based rendering system
+    renderingSystem?: RenderingSystem; // Single parameter to control rendering system
     enableOcclusionCulling?: boolean; // Toggle occlusion culling
-    particleSize?: number; // Size of particles for WebGPU rendering
+    particleSize?: number; // Size of particles
 }
 
 export class EntityManager {
@@ -34,9 +35,8 @@ export class EntityManager {
     private particleGeometry: THREE.BufferGeometry | null = null;
     private particleMaterial: THREE.PointsMaterial | null = null;
 
-    // WebGPU rendering system
-    private webgpuRenderer: WebGPUSatelliteRenderer | null = null;
-    private renderer: THREE.WebGLRenderer | null = null;
+    // SatPoints system
+    private satPoints: SatPoints | null = null;
 
     // Event callbacks
     private onSatelliteAdded?: (satellite: SatelliteEntity) => void;
@@ -52,9 +52,8 @@ export class EntityManager {
             maxSatellites: 100000,
             autoCleanup: true,
             updateInterval: 1000, // 1 second
-            useInstancedMesh: true, // Default to instanced mesh
-            useWebGPURendering: false, // Default to false, enable for high performance
-            enableOcclusionCulling: false, // Default to enabled
+            renderingSystem: "instanced", // Default to instanced mesh
+            enableOcclusionCulling: false, // Default to disabled
             particleSize: 0.01, // Default particle size
             ...options,
         };
@@ -231,15 +230,17 @@ export class EntityManager {
     private updateInstancedMesh(): void {
         const satellites = this.getAllSatellites();
 
-        if (this.options.useWebGPURendering && this.webgpuRenderer) {
-            // Use WebGPU rendering system
-            this.webgpuRenderer.updateSatellites(satellites, this.currentTime);
-        } else if (this.options.useInstancedMesh) {
-            // Use instanced mesh system
-            this.updateInstancedMeshSystem(satellites);
-        } else {
-            // Use particle system
-            this.updateParticleSystem(satellites);
+        switch (this.options.renderingSystem) {
+            case "satpoints":
+                this.updateSatPointsSystem(satellites);
+                break;
+            case "instanced":
+                this.updateInstancedMeshSystem(satellites);
+                break;
+            case "particle":
+            default:
+                this.updateParticleSystem(satellites);
+                break;
         }
     }
 
@@ -268,6 +269,29 @@ export class EntityManager {
 
         // Update positions and colors efficiently
         this.updateInstanceData(satellites);
+    }
+
+    private updateSatPointsSystem(satellites: SatelliteEntity[]): void {
+        // Remove existing SatPoints if no satellites
+        if (satellites.length === 0) {
+            if (this.satPoints) {
+                this.scene.remove(this.satPoints);
+                this.satPoints = null;
+                this.currentSatelliteCount = 0;
+            }
+            return;
+        }
+
+        // Only create SatPoints if it doesn't exist
+        if (!this.satPoints) {
+            this.createSatPointsSystem();
+        }
+
+        // Update current satellite count
+        this.currentSatelliteCount = satellites.length;
+
+        // Update positions and colors efficiently
+        this.updateSatPointsData(satellites);
     }
 
     private updateParticleSystem(satellites: SatelliteEntity[]): void {
@@ -614,6 +638,136 @@ export class EntityManager {
         // DO NOT call computeBoundingSphere() here - it's too expensive!
         // The bounding sphere is already set to encompass all possible positions
     }
+
+    private createSatPointsSystem(): void {
+        const satellites = this.getAllSatellites();
+        if (satellites.length === 0) return;
+
+        // Remove existing SatPoints
+        if (this.satPoints) {
+            this.scene.remove(this.satPoints);
+        }
+
+        // Create SatPoints with maximum capacity
+        this.satPoints = new SatPoints(this.options.maxSatellites);
+
+        // Initialize ALL satellites to hidden position (do this ONCE)
+        const satArray = this.satPoints.satArray;
+        const satColor = this.satPoints.satColor;
+        const visibilityArray = this.satPoints.visibilityArray;
+        const sizeArray = this.satPoints.sizeArray;
+
+        for (let i = 0; i < this.options.maxSatellites; i++) {
+            const i3 = i * 3;
+            satArray[i3] = 10000;
+            satArray[i3 + 1] = 10000;
+            satArray[i3 + 2] = 10000;
+            satColor[i3] = 0;
+            satColor[i3 + 1] = 0;
+            satColor[i3 + 2] = 0;
+            visibilityArray[i] = 0;
+            sizeArray[i] = 1;
+        }
+
+        if (this.satPoints) {
+            this.scene.add(this.satPoints);
+        }
+
+        // Reset lastSatelliteCount to ensure proper update
+        this.lastSatelliteCount = 0;
+
+        // Update data for current satellites
+        this.updateSatPointsData(satellites);
+    }
+
+    private updateSatPointsData(satellites: SatelliteEntity[]): void {
+        if (!this.satPoints) return;
+
+        // DIRECT buffer manipulation - no method calls!
+        const satArray = this.satPoints.satArray;
+        const satColor = this.satPoints.satColor;
+        const visibilityArray = this.satPoints.visibilityArray;
+        const sizeArray = this.satPoints.sizeArray;
+
+        // Update active satellites - NO FRUSTUM CULLING
+        for (let j = 0; j < satellites.length; j++) {
+            const satellite = satellites[j];
+            const position = satellite.getPositionDirect();
+
+            // Direct array access
+            const j3 = j * 3;
+            satArray[j3] = position.x;
+            satArray[j3 + 1] = position.y;
+            satArray[j3 + 2] = position.z;
+
+            // Direct color access - cache the color conversion
+            const color = satellite.getColor();
+            this.tempColor.setHex(color);
+
+            satColor[j3] = this.tempColor.r;
+            satColor[j3 + 1] = this.tempColor.g;
+            satColor[j3 + 2] = this.tempColor.b;
+
+            // Direct visibility - always visible
+            visibilityArray[j] = 1;
+
+            // Direct size - static, could skip updating this
+            sizeArray[j] = 1;
+        }
+
+        // Hide unused satellites
+        for (let j = satellites.length; j < this.options.maxSatellites; j++) {
+            const j3 = j * 3;
+            satArray[j3] = 10000;
+            satArray[j3 + 1] = 10000;
+            satArray[j3 + 2] = 10000;
+            satColor[j3] = 0;
+            satColor[j3 + 1] = 0;
+            satColor[j3 + 2] = 0;
+            visibilityArray[j] = 0;
+        }
+
+        // Use update ranges like instanced mesh
+        const updateCount = Math.max(satellites.length, this.lastSatelliteCount);
+
+        if (updateCount > 0) {
+            this.satPoints.satPositionAttribute.updateRanges = [
+                {
+                    start: 0,
+                    count: updateCount,
+                },
+            ];
+            this.satPoints.satColorAttribute.updateRanges = [
+                {
+                    start: 0,
+                    count: updateCount,
+                },
+            ];
+            // Only update visibility if satellites were added/removed
+            if (satellites.length !== this.lastSatelliteCount) {
+                this.satPoints.satVisibilityAttribute.updateRanges = [
+                    {
+                        start: 0,
+                        count: updateCount,
+                    },
+                ];
+            }
+        }
+
+        // Mark attributes for update
+        this.satPoints.satPositionAttribute.needsUpdate = true;
+        this.satPoints.satColorAttribute.needsUpdate = true;
+
+        // Only update visibility when count changes
+        if (satellites.length !== this.lastSatelliteCount) {
+            this.satPoints.satVisibilityAttribute.needsUpdate = true;
+        }
+
+        // Skip size updates if static (remove this line entirely if sizes never change)
+        // this.satPoints.satSizeAttribute.needsUpdate = true;
+
+        this.lastSatelliteCount = satellites.length;
+    }
     public setTime(time: Date): void {
         this.currentTime = time;
         this.update(time);
@@ -778,10 +932,14 @@ export class EntityManager {
     }
 
     public getCurrentSystem(): THREE.Object3D | null {
-        if (this.options.useInstancedMesh) {
-            return this.instancedMesh;
-        } else {
-            return this.particleSystem;
+        switch (this.options.renderingSystem) {
+            case "satpoints":
+                return this.satPoints;
+            case "instanced":
+                return this.instancedMesh;
+            case "particle":
+            default:
+                return this.particleSystem;
         }
     }
 
@@ -789,29 +947,37 @@ export class EntityManager {
         satelliteCount: number;
         maxSatellites: number;
         isOptimized: boolean;
-        systemType: "instanced" | "particle" | "webgpu";
-        webgpuReady: boolean;
+        systemType: RenderingSystem;
     } {
         return {
             satelliteCount: this.currentSatelliteCount,
             maxSatellites: this.options.maxSatellites,
-            isOptimized: this.options.useWebGPURendering
-                ? this.webgpuRenderer !== null && this.webgpuRenderer.isReady()
-                : this.options.useInstancedMesh
-                ? this.instancedMesh !== null
-                : this.particleSystem !== null,
-            systemType: this.options.useWebGPURendering ? "webgpu" : this.options.useInstancedMesh ? "instanced" : "particle",
-            webgpuReady: this.webgpuRenderer ? this.webgpuRenderer.isReady() : false,
+            isOptimized:
+                this.options.renderingSystem === "satpoints"
+                    ? this.satPoints !== null
+                    : this.options.renderingSystem === "instanced"
+                    ? this.instancedMesh !== null
+                    : this.particleSystem !== null,
+            systemType: this.options.renderingSystem,
         };
     }
 
-    public setUseInstancedMesh(useInstanced: boolean): void {
-        if (this.options.useInstancedMesh !== useInstanced) {
-            this.options.useInstancedMesh = useInstanced;
+    public setRenderingSystem(system: RenderingSystem): void {
+        if (this.options.renderingSystem !== system) {
+            const oldSystem = this.options.renderingSystem;
+            this.options.renderingSystem = system;
 
-            // Clean up current system
-            if (useInstanced) {
-                // Switching to instanced mesh, clean up particle system
+            // Clean up old system
+            this.cleanupRenderingSystem(oldSystem);
+
+            // Recreate the system
+            this.updateInstancedMesh();
+        }
+    }
+
+    private cleanupRenderingSystem(system: RenderingSystem): void {
+        switch (system) {
+            case "particle":
                 if (this.particleSystem) {
                     this.scene.remove(this.particleSystem);
                     this.particleGeometry?.dispose();
@@ -820,8 +986,8 @@ export class EntityManager {
                     this.particleGeometry = null;
                     this.particleMaterial = null;
                 }
-            } else {
-                // Switching to particle system, clean up instanced mesh
+                break;
+            case "instanced":
                 if (this.instancedMesh) {
                     this.scene.remove(this.instancedMesh);
                     this.satelliteGeometry?.dispose();
@@ -830,47 +996,49 @@ export class EntityManager {
                     this.satelliteGeometry = null;
                     this.satelliteMaterial = null;
                 }
-            }
-
-            // Recreate the system
-            this.updateInstancedMesh();
+                break;
+            case "satpoints":
+                if (this.satPoints) {
+                    this.scene.remove(this.satPoints);
+                    this.satPoints = null;
+                }
+                break;
         }
+    }
+
+    /**
+     * Set the base size for SatPoints circles
+     */
+    public setSatPointsSize(size: number): void {
+        if (this.satPoints) {
+            this.satPoints.setBaseSize(size);
+        }
+    }
+
+    /**
+     * Get the current SatPoints size
+     */
+    public getSatPointsSize(): number {
+        if (this.satPoints) {
+            return this.satPoints.getBaseSize();
+        }
+        return 0.2; // Default size
     }
 
     public setOcclusionCulling(enabled: boolean): void {
         this.options.enableOcclusionCulling = enabled;
-        if (this.webgpuRenderer) {
-            this.webgpuRenderer.setOcclusionCulling(enabled);
-        }
     }
 
     public getOcclusionCulling(): boolean {
         return this.options.enableOcclusionCulling;
     }
 
-    public setRenderer(renderer: THREE.WebGLRenderer): void {
-        this.renderer = renderer;
-        this.initializeWebGPUSystem();
-    }
-
-    public setUseWebGPURendering(useWebGPU: boolean): void {
-        this.options.useWebGPURendering = useWebGPU;
-        if (useWebGPU && this.renderer) {
-            this.initializeWebGPUSystem();
-        } else if (!useWebGPU && this.webgpuRenderer) {
-            this.cleanupWebGPUSystem();
-        }
-    }
-
-    public getUseWebGPURendering(): boolean {
-        return this.options.useWebGPURendering;
+    public getRenderingSystem(): RenderingSystem {
+        return this.options.renderingSystem;
     }
 
     public setParticleSize(size: number): void {
         this.options.particleSize = size;
-        if (this.webgpuRenderer) {
-            this.webgpuRenderer.setParticleSize(size);
-        }
     }
 
     public getParticleSize(): number {
@@ -915,10 +1083,10 @@ export class EntityManager {
         const wasMeshUpdatesEnabled = this.meshUpdatesEnabled;
         this.meshUpdatesEnabled = true;
 
-        if (this.options.useWebGPURendering && this.webgpuRenderer) {
-            this.webgpuRenderer.updateSatellites(satellites, this.currentTime);
-        } else if (this.options.useInstancedMesh) {
+        if (this.options.renderingSystem === "instanced") {
             this.updateInstancedMeshSystem(satellites);
+        } else if (this.options.renderingSystem === "satpoints") {
+            this.updateSatPointsSystem(satellites);
         } else {
             this.updateParticleSystem(satellites);
         }
@@ -930,83 +1098,9 @@ export class EntityManager {
         console.log(`Mesh updated with ${satellites.length} satellites (mesh updates remain ${wasMeshUpdatesEnabled ? "enabled" : "disabled"})`);
     }
 
-    public static isWebGPUSupported(): boolean {
-        return typeof navigator !== "undefined" && "gpu" in navigator;
-    }
-
-    public getWebGPUSupportInfo(): {
-        supported: boolean;
-        reason?: string;
-        fallbackSystem: "instanced" | "particle";
-    } {
-        if (!EntityManager.isWebGPUSupported()) {
-            return {
-                supported: false,
-                reason: "WebGPU not supported in this browser",
-                fallbackSystem: this.options.useInstancedMesh ? "instanced" : "particle",
-            };
-        }
-
-        if (this.webgpuRenderer && this.webgpuRenderer.isReady()) {
-            return {
-                supported: true,
-                fallbackSystem: this.options.useInstancedMesh ? "instanced" : "particle",
-            };
-        }
-
-        return {
-            supported: false,
-            reason: "WebGPU adapter not available (try enabling experimental features)",
-            fallbackSystem: this.options.useInstancedMesh ? "instanced" : "particle",
-        };
-    }
-
-    private initializeWebGPUSystem(): void {
-        if (!this.renderer || !this.options.useWebGPURendering) return;
-
-        this.cleanupWebGPUSystem();
-
-        try {
-            const webgpuOptions: WebGPUSatelliteRendererOptions = {
-                maxSatellites: this.options.maxSatellites,
-                enableOcclusionCulling: this.options.enableOcclusionCulling,
-                particleSize: this.options.particleSize,
-                useInstancedRendering: true,
-            };
-
-            this.webgpuRenderer = new WebGPUSatelliteRenderer(this.renderer, this.scene, webgpuOptions);
-
-            // Check if WebGPU system initialized properly
-            if (!this.webgpuRenderer || !this.webgpuRenderer.isReady()) {
-                console.warn("WebGPU system failed to initialize, falling back to instanced mesh rendering");
-                this.options.useWebGPURendering = false;
-                this.options.useInstancedMesh = true; // Fallback to instanced mesh
-                this.webgpuRenderer = null;
-            } else {
-                console.log("WebGPU system initialized successfully");
-            }
-        } catch (error) {
-            console.error("Failed to initialize WebGPU system:", error);
-            console.log("Falling back to instanced mesh rendering");
-            this.options.useWebGPURendering = false;
-            this.options.useInstancedMesh = true; // Fallback to instanced mesh
-            this.webgpuRenderer = null;
-        }
-    }
-
-    private cleanupWebGPUSystem(): void {
-        if (this.webgpuRenderer) {
-            this.webgpuRenderer.dispose();
-            this.webgpuRenderer = null;
-        }
-    }
-
     public dispose(): void {
         this.clearAll();
         this.satellites.clear();
-
-        // Clean up WebGPU system
-        this.cleanupWebGPUSystem();
 
         // Clean up instanced mesh
         if (this.instancedMesh) {
@@ -1016,6 +1110,12 @@ export class EntityManager {
             this.instancedMesh = null;
             this.satelliteGeometry = null;
             this.satelliteMaterial = null;
+        }
+
+        // Clean up SatPoints system
+        if (this.satPoints) {
+            this.scene.remove(this.satPoints);
+            this.satPoints = null;
         }
 
         // Clean up particle system

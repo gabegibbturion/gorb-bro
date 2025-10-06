@@ -3,7 +3,7 @@ import SunCalc from "suncalc";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EnhancedGlobe } from "./EnhancedGlobe";
-import { EntityManager } from "./EntityManager";
+import { EntityManager, type RenderingSystem } from "./EntityManager";
 import type { OrbitalElements } from "./OrbitalElements";
 import { SatelliteEntity } from "./SatelliteEntity";
 import { TLEParser } from "./TLEParser";
@@ -17,7 +17,7 @@ export interface GlobeEngineOptions {
     autoRotate?: boolean;
     rotationSpeed?: number;
     maxSatellites?: number;
-    useInstancedMesh?: boolean;
+    renderingSystem?: RenderingSystem; // Single parameter to control rendering system
     useEnhancedGlobe?: boolean; // Use enhanced globe with high-quality textures
 }
 
@@ -31,6 +31,7 @@ export class GlobeEngine {
     private enhancedGlobe: EnhancedGlobe | null = null;
     private controls!: OrbitControls;
     private sunLight!: THREE.DirectionalLight;
+    private sun!: THREE.Mesh;
     private stats!: Stats;
     private animationId: number | null = null;
     private isRunning: boolean = false;
@@ -61,7 +62,7 @@ export class GlobeEngine {
             autoRotate: false,
             rotationSpeed: 0.001,
             maxSatellites: 50,
-            useInstancedMesh: false,
+            renderingSystem: "instanced", // Default to instanced mesh
             useEnhancedGlobe: false, // Default to enhanced globe
             ...options,
         };
@@ -85,7 +86,6 @@ export class GlobeEngine {
         this.createGlobe();
         this.createLights();
         this.createEntityManager();
-        this.entityManager.setUseInstancedMesh(this.options.useInstancedMesh);
         this.createControls();
         this.setupEventListeners();
 
@@ -168,6 +168,7 @@ export class GlobeEngine {
 
             this.globe = new THREE.Mesh(geometry, material);
             this.globe.receiveShadow = true;
+            this.globe.castShadow = true;
             this.scene.add(this.globe);
         }
     }
@@ -213,10 +214,16 @@ export class GlobeEngine {
         this.scene.add(ambientLight);
 
         // Directional light (sun) - position will be calculated based on current time
-        this.sunLight = new THREE.DirectionalLight(0xffffff, this.options.useEnhancedGlobe ? 1.3 : 5.0);
+        this.sunLight = new THREE.DirectionalLight(0xffffff, this.options.useEnhancedGlobe ? 3.0 : 8.0);
         this.sunLight.castShadow = true;
-        this.sunLight.shadow.mapSize.width = 2048;
-        this.sunLight.shadow.mapSize.height = 2048;
+        this.sunLight.shadow.mapSize.width = 4096;
+        this.sunLight.shadow.mapSize.height = 4096;
+        this.sunLight.shadow.camera.near = 0.1;
+        this.sunLight.shadow.camera.far = 50;
+        this.sunLight.shadow.camera.left = -10;
+        this.sunLight.shadow.camera.right = 10;
+        this.sunLight.shadow.camera.top = 10;
+        this.sunLight.shadow.camera.bottom = -10;
         this.scene.add(this.sunLight);
 
         // Set the sun light for the enhanced globe
@@ -224,8 +231,27 @@ export class GlobeEngine {
             this.enhancedGlobe.setDirectionalLight(this.sunLight);
         }
 
+        // Create sun object
+        this.createSun();
+
         // Initialize sun position
         this.updateSunPosition();
+    }
+
+    private createSun(): void {
+        // Create sun geometry - small sphere
+        const sunGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+
+        // Create sun material with bright yellow/white color and emissive properties
+        const sunMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffffaa,
+        });
+
+        // Create sun mesh
+        this.sun = new THREE.Mesh(sunGeometry, sunMaterial);
+
+        // Add sun to scene
+        this.scene.add(this.sun);
     }
 
     private createEntityManager(): void {
@@ -233,10 +259,8 @@ export class GlobeEngine {
             maxSatellites: this.options.maxSatellites,
             autoCleanup: true,
             updateInterval: 16, // Update every frame (60fps)
+            renderingSystem: this.options.renderingSystem,
         });
-
-        // Set renderer for GPU system
-        this.entityManager.setRenderer(this.renderer);
 
         // Set up entity manager callbacks
         this.entityManager.onUpdateCallback((satellites) => {
@@ -425,6 +449,11 @@ export class GlobeEngine {
         // Update sun light position
         this.sunLight.position.set(x, y, z);
 
+        // Update sun object position to match the light
+        if (this.sun) {
+            this.sun.position.set(x, y, z);
+        }
+
         // Update light intensity based on sun altitude (darker when sun is below horizon)
         const intensity = Math.max(0, Math.sin(sunPosition.altitude));
         this.sunLight.intensity = intensity;
@@ -508,16 +537,27 @@ export class GlobeEngine {
         return this.entityManager;
     }
 
-    public setUseInstancedMesh(useInstanced: boolean): void {
-        this.entityManager.setUseInstancedMesh(useInstanced);
+    public setRenderingSystem(system: RenderingSystem): void {
+        this.entityManager.setRenderingSystem(system);
+    }
+
+    public getRenderingSystem(): RenderingSystem {
+        return this.entityManager.getRenderingSystem();
+    }
+
+    public setSatPointsSize(size: number): void {
+        this.entityManager.setSatPointsSize(size);
+    }
+
+    public getSatPointsSize(): number {
+        return this.entityManager.getSatPointsSize();
     }
 
     public getSystemInfo(): {
         satelliteCount: number;
         maxSatellites: number;
         isOptimized: boolean;
-        systemType: "instanced" | "particle" | "webgpu";
-        webgpuReady: boolean;
+        systemType: RenderingSystem;
     } {
         return this.entityManager.getSystemInfo();
     }
@@ -622,14 +662,6 @@ export class GlobeEngine {
         this.setGlobeVisible(!this.getGlobeVisible());
     }
 
-    public setUseWebGPURendering(useWebGPU: boolean): void {
-        this.entityManager.setUseWebGPURendering(useWebGPU);
-    }
-
-    public getUseWebGPURendering(): boolean {
-        return this.entityManager.getUseWebGPURendering();
-    }
-
     public setMeshUpdatesEnabled(enabled: boolean): void {
         this.entityManager.setMeshUpdatesEnabled(enabled);
     }
@@ -640,15 +672,6 @@ export class GlobeEngine {
 
     public forceUpdateMesh(): void {
         this.entityManager.forceUpdateMesh();
-    }
-
-    // Alias methods for backward compatibility
-    public setUseGPURendering(useGPU: boolean): void {
-        this.setUseWebGPURendering(useGPU);
-    }
-
-    public getUseGPURendering(): boolean {
-        return this.getUseWebGPURendering();
     }
 
     public dispose(): void {
@@ -679,5 +702,23 @@ export class GlobeEngine {
 
     public getEnhancedGlobe(): EnhancedGlobe | null {
         return this.enhancedGlobe;
+    }
+
+    public setSunVisible(visible: boolean): void {
+        if (this.sun) {
+            this.sun.visible = visible;
+        }
+    }
+
+    public getSunVisible(): boolean {
+        return this.sun ? this.sun.visible : false;
+    }
+
+    public toggleSunVisibility(): void {
+        this.setSunVisible(!this.getSunVisible());
+    }
+
+    public getSun(): THREE.Mesh | null {
+        return this.sun;
     }
 }
