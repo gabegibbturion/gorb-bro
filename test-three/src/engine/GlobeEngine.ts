@@ -74,6 +74,14 @@ export class GlobeEngine {
     private onSatelliteUpdate?: (satellites: SatelliteEntity[]) => void;
     private onEntitySelected?: (entity: SatelliteEntity | null) => void;
 
+    // Timing variables for performance monitoring
+    private frameStartTime: number = 0;
+    private propagationStartTime: number = 0;
+    private propagationEndTime: number = 0;
+    private renderStartTime: number = 0;
+    private renderEndTime: number = 0;
+    private timingDisplay: HTMLElement | null = null;
+
     constructor(options: GlobeEngineOptions) {
         this.container = options.container;
         this.options = {
@@ -115,6 +123,7 @@ export class GlobeEngine {
         this.createOrbitManager();
         this.createControls();
         this.setupEventListeners();
+        this.createTimingDisplay();
 
         if (this.onEngineReady) {
             this.onEngineReady();
@@ -385,6 +394,47 @@ export class GlobeEngine {
         this.renderer.domElement.addEventListener("click", (event) => this.onMouseClick(event));
     }
 
+    private createTimingDisplay(): void {
+        this.timingDisplay = document.createElement("div");
+        this.timingDisplay.id = "timing-display";
+        this.timingDisplay.style.cssText = `
+            position: absolute;
+            top: 60px;
+            right: 40px;
+            color: white;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1000;
+            min-width: 200px;
+        `;
+        this.timingDisplay.innerHTML = `
+            <div>Frame: <span id="frame-time">0.0</span>ms</div>
+            <div>Render: <span id="render-time">0.0</span>ms</div>
+            <div>Prop: <span id="prop-time">0.0</span>ms</div>
+        `;
+        this.container.appendChild(this.timingDisplay);
+    }
+
+    private updateTimingDisplay(): void {
+        if (!this.timingDisplay) return;
+
+        const frameTime = performance.now() - this.frameStartTime;
+        const propagationTime = this.propagationEndTime - this.propagationStartTime;
+        const renderTime = this.renderEndTime - this.renderStartTime;
+
+        // Update timing display elements
+        const frameTimeElement = this.timingDisplay.querySelector("#frame-time");
+        const renderTimeElement = this.timingDisplay.querySelector("#render-time");
+        const propTimeElement = this.timingDisplay.querySelector("#prop-time");
+
+        if (frameTimeElement) frameTimeElement.textContent = frameTime.toFixed(2);
+        if (renderTimeElement) renderTimeElement.textContent = renderTime.toFixed(2);
+        if (propTimeElement) propTimeElement.textContent = propagationTime.toFixed(2);
+    }
+
     private onWindowResize(): void {
         const width = this.container.clientWidth;
         const height = this.container.clientHeight;
@@ -491,6 +541,8 @@ export class GlobeEngine {
 
         this.animationId = requestAnimationFrame(() => this.animate());
 
+        this.frameStartTime = performance.now();
+
         if (this.stats) {
             this.stats.begin();
         }
@@ -503,7 +555,11 @@ export class GlobeEngine {
 
         // Update time
         this.currentTime = new Date(this.currentTime.getTime() + deltaTime * this.timeMultiplier * 1000);
+
+        // Track propagation time
+        this.propagationStartTime = performance.now();
         this.entityManager.setTime(this.currentTime);
+        this.propagationEndTime = performance.now();
 
         // Rotate the globe based on actual Earth rotation
         if (this.enableGlobeRotation) {
@@ -548,7 +604,13 @@ export class GlobeEngine {
             this.onTimeUpdate(this.currentTime);
         }
 
+        // Track rendering time
+        this.renderStartTime = performance.now();
         this.renderer.render(this.scene, this.camera);
+        this.renderEndTime = performance.now();
+
+        // Update timing display
+        this.updateTimingDisplay();
 
         if (this.stats) {
             this.stats.end();
@@ -818,6 +880,10 @@ export class GlobeEngine {
 
         if (this.stats && this.container) {
             this.container.removeChild(this.stats.dom);
+        }
+
+        if (this.timingDisplay && this.container) {
+            this.container.removeChild(this.timingDisplay);
         }
 
         if (this.renderer) {
