@@ -583,6 +583,14 @@ export class GlobeEngine {
         return this.entityManager.addSatellite(orbitalElements, options);
     }
 
+    public setPropagatorType(propagatorType: "satellitejs" | "k2"): void {
+        this.entityManager.setPropagatorType(propagatorType);
+    }
+
+    public getPropagatorType(): "satellitejs" | "k2" {
+        return this.entityManager.getPropagatorType();
+    }
+
     public addRandomSatellite(name?: string): SatelliteEntity | null {
         return this.entityManager.addRandomSatellite(name);
     }

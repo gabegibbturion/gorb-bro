@@ -49,6 +49,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [orbitCount, setOrbitCount] = useState(0);
     const [orbitSize, setOrbitSize] = useState(1.0);
     const [satelliteSize, setSatelliteSize] = useState(0.01);
+    const [propagatorType, setPropagatorType] = useState<"satellitejs" | "k2">("satellitejs");
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -262,7 +263,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 const jsonData = await response.json();
                 const pageData = jsonData.data || [];
 
-                console.log(`Page ${page}: Received ${pageData.length} satellites (Total available: ${jsonData.total || 'unknown'})`);
+                console.log(`Page ${page}: Received ${pageData.length} satellites (Total available: ${jsonData.total || "unknown"})`);
 
                 allTLEData = allTLEData.concat(pageData);
 
@@ -290,7 +291,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 }
             });
 
-            const tleContent = tleLines.join('\n');
+            const tleContent = tleLines.join("\n");
 
             // Clear existing satellites first
             clearAllSatellites();
@@ -300,7 +301,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             console.log(`Successfully loaded ${satellites.length} satellites from Turion Space API`);
         } catch (error) {
             console.error("Failed to load from Turion Space API:", error);
-            alert(`Failed to load from Turion Space API: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            alert(`Failed to load from Turion Space API: ${error instanceof Error ? error.message : "Unknown error"}`);
         } finally {
             setTleLoading(false);
         }
@@ -658,6 +659,50 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                         style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
                                     />
                                     <div style={{ fontWeight: "bold", color: renderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "15px" }}>{option.label}</div>
+                                    <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Propagator System */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Propagator:</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px" }}>
+                            {[
+                                { value: "satellitejs", label: "Satellite.js", description: "SGP4/SDP4" },
+                                { value: "k2", label: "K2", description: "Runge-Kutta 2" },
+                            ].map((option) => (
+                                <label
+                                    key={option.value}
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        alignItems: "center",
+                                        padding: "4px",
+                                        cursor: "pointer",
+                                        backgroundColor: propagatorType === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
+                                        borderRadius: "2px",
+                                        border: propagatorType === option.value ? "1px solid #4CAF50" : "1px solid transparent",
+                                        fontSize: "15px",
+                                        transition: "all 0.2s ease",
+                                    }}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="propagatorType"
+                                        value={option.value}
+                                        checked={propagatorType === option.value}
+                                        onChange={(e) => {
+                                            const newPropagator = e.target.value as "satellitejs" | "k2";
+                                            setPropagatorType(newPropagator);
+                                            if (engineRef.current) {
+                                                engineRef.current.setPropagatorType(newPropagator);
+                                            }
+                                        }}
+                                        style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
+                                    />
+                                    <div style={{ fontWeight: "bold", color: propagatorType === option.value ? "#4CAF50" : "#fff", fontSize: "15px" }}>{option.label}</div>
                                     <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
                                 </label>
                             ))}
