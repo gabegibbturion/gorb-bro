@@ -566,8 +566,8 @@ function createUI() {
     <div style="margin-bottom: 10px;">
       <label for="propagation-method">Propagation Method:</label><br>
       <select id="propagation-method" style="width: 120px; margin: 5px 0;">
-        
       <option value="satellitejs">Satellite.js</option>
+        <option value="custom">Custom</option>
 
       </select>
     </div>
