@@ -49,6 +49,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [orbitCount, setOrbitCount] = useState(0);
     const [orbitSize, setOrbitSize] = useState(1.0);
     const [satelliteSize, setSatelliteSize] = useState(0.01);
+    const [propagationMethod, setPropagationMethod] = useState<"satellite.js" | "k2">("satellite.js");
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -143,6 +144,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 showTrail: false, // Temporarily disabled
                 trailLength: 50 + Math.random() * 100,
                 trailColor: color,
+                propagationMethod: propagationMethod,
             });
             if (satellite) {
                 // Add orbit for this satellite
@@ -164,7 +166,12 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         const colors = [0xffff00, 0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xff8800, 0x8800ff, 0x00ff88, 0xff0088];
 
         // Use batch loading for much better performance
-        engineRef.current.addRandomTLEFromCOEBatch(satelliteCountInput, "Random-Sat", [400, 800], colors);
+        const satellites = engineRef.current.addRandomTLEFromCOEBatch(satelliteCountInput, "Random-Sat", [400, 800], colors);
+
+        // Set propagation method for all new satellites
+        satellites.forEach((satellite) => {
+            satellite.setPropagationMethod(propagationMethod);
+        });
     };
 
     const clearAllSatellites = () => {
@@ -221,6 +228,11 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             // Load TLEs into the globe
             const satellites = engineRef.current.loadTLEFromFile(content, maxCount);
             console.log(`Loaded ${satellites.length} satellites from TLE file`);
+
+            // Set propagation method for all loaded satellites
+            satellites.forEach((satellite) => {
+                satellite.setPropagationMethod(propagationMethod);
+            });
         } catch (error) {
             console.error("Failed to load TLE file:", error);
             alert("Failed to load TLE file. Please check that gp.txt exists in the assets folder.");
@@ -262,7 +274,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 const jsonData = await response.json();
                 const pageData = jsonData.data || [];
 
-                console.log(`Page ${page}: Received ${pageData.length} satellites (Total available: ${jsonData.total || 'unknown'})`);
+                console.log(`Page ${page}: Received ${pageData.length} satellites (Total available: ${jsonData.total || "unknown"})`);
 
                 allTLEData = allTLEData.concat(pageData);
 
@@ -290,7 +302,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                 }
             });
 
-            const tleContent = tleLines.join('\n');
+            const tleContent = tleLines.join("\n");
 
             // Clear existing satellites first
             clearAllSatellites();
@@ -298,9 +310,14 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             // Load TLEs into the globe
             const satellites = engineRef.current.loadTLEFromFile(tleContent, 0);
             console.log(`Successfully loaded ${satellites.length} satellites from Turion Space API`);
+
+            // Set propagation method for all loaded satellites
+            satellites.forEach((satellite) => {
+                satellite.setPropagationMethod(propagationMethod);
+            });
         } catch (error) {
             console.error("Failed to load from Turion Space API:", error);
-            alert(`Failed to load from Turion Space API: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            alert(`Failed to load from Turion Space API: ${error instanceof Error ? error.message : "Unknown error"}`);
         } finally {
             setTleLoading(false);
         }
@@ -658,6 +675,54 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                         style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
                                     />
                                     <div style={{ fontWeight: "bold", color: renderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "15px" }}>{option.label}</div>
+                                    <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Propagation Method */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Propagation:</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px" }}>
+                            {[
+                                { value: "satellite.js", label: "SGP4", description: "Standard" },
+                                { value: "k2", label: "K2", description: "Custom" },
+                            ].map((option) => (
+                                <label
+                                    key={option.value}
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        alignItems: "center",
+                                        padding: "4px",
+                                        cursor: "pointer",
+                                        backgroundColor: propagationMethod === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
+                                        borderRadius: "2px",
+                                        border: propagationMethod === option.value ? "1px solid #4CAF50" : "1px solid transparent",
+                                        fontSize: "15px",
+                                        transition: "all 0.2s ease",
+                                    }}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="propagationMethod"
+                                        value={option.value}
+                                        checked={propagationMethod === option.value}
+                                        onChange={(e) => {
+                                            const newMethod = e.target.value as "satellite.js" | "k2";
+                                            setPropagationMethod(newMethod);
+                                            if (engineRef.current) {
+                                                // Update all existing satellites
+                                                const satellites = engineRef.current.getAllSatellites();
+                                                satellites.forEach((satellite) => {
+                                                    satellite.setPropagationMethod(newMethod);
+                                                });
+                                            }
+                                        }}
+                                        style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
+                                    />
+                                    <div style={{ fontWeight: "bold", color: propagationMethod === option.value ? "#4CAF50" : "#fff", fontSize: "15px" }}>{option.label}</div>
                                     <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
                                 </label>
                             ))}

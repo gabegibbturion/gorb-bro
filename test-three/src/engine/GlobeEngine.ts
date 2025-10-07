@@ -78,9 +78,20 @@ export class GlobeEngine {
     private frameStartTime: number = 0;
     private propagationStartTime: number = 0;
     private propagationEndTime: number = 0;
+    private satelliteUpdateStartTime: number = 0;
+    private satelliteUpdateEndTime: number = 0;
+    private instancedMeshUpdateStartTime: number = 0;
+    private instancedMeshUpdateEndTime: number = 0;
     private renderStartTime: number = 0;
     private renderEndTime: number = 0;
     private timingDisplay: HTMLElement | null = null;
+
+    // Timing results for display
+    private lastFrameTime: number = 0;
+    private lastPropagationTime: number = 0;
+    private lastSatelliteUpdateTime: number = 0;
+    private lastInstancedMeshUpdateTime: number = 0;
+    private lastRenderTime: number = 0;
 
     constructor(options: GlobeEngineOptions) {
         this.container = options.container;
@@ -414,25 +425,35 @@ export class GlobeEngine {
             <div>Frame: <span id="frame-time">0.0</span>ms</div>
             <div>Render: <span id="render-time">0.0</span>ms</div>
             <div>Prop: <span id="prop-time">0.0</span>ms</div>
+            <div>Sat Update: <span id="sat-update-time">0.0</span>ms</div>
+            <div>Mesh Update: <span id="mesh-update-time">0.0</span>ms</div>
         `;
         this.container.appendChild(this.timingDisplay);
+    }
+
+    private calculateTimingResults(): void {
+        this.lastFrameTime = performance.now() - this.frameStartTime;
+        this.lastPropagationTime = this.propagationEndTime - this.propagationStartTime;
+        this.lastSatelliteUpdateTime = this.satelliteUpdateEndTime - this.satelliteUpdateStartTime;
+        this.lastInstancedMeshUpdateTime = this.instancedMeshUpdateEndTime - this.instancedMeshUpdateStartTime;
+        this.lastRenderTime = this.renderEndTime - this.renderStartTime;
     }
 
     private updateTimingDisplay(): void {
         if (!this.timingDisplay) return;
 
-        const frameTime = performance.now() - this.frameStartTime;
-        const propagationTime = this.propagationEndTime - this.propagationStartTime;
-        const renderTime = this.renderEndTime - this.renderStartTime;
-
         // Update timing display elements
         const frameTimeElement = this.timingDisplay.querySelector("#frame-time");
         const renderTimeElement = this.timingDisplay.querySelector("#render-time");
         const propTimeElement = this.timingDisplay.querySelector("#prop-time");
+        const satUpdateTimeElement = this.timingDisplay.querySelector("#sat-update-time");
+        const meshUpdateTimeElement = this.timingDisplay.querySelector("#mesh-update-time");
 
-        if (frameTimeElement) frameTimeElement.textContent = frameTime.toFixed(2);
-        if (renderTimeElement) renderTimeElement.textContent = renderTime.toFixed(2);
-        if (propTimeElement) propTimeElement.textContent = propagationTime.toFixed(2);
+        if (frameTimeElement) frameTimeElement.textContent = this.lastFrameTime.toFixed(2);
+        if (renderTimeElement) renderTimeElement.textContent = this.lastRenderTime.toFixed(2);
+        if (propTimeElement) propTimeElement.textContent = this.lastPropagationTime.toFixed(2);
+        if (satUpdateTimeElement) satUpdateTimeElement.textContent = this.lastSatelliteUpdateTime.toFixed(2);
+        if (meshUpdateTimeElement) meshUpdateTimeElement.textContent = this.lastInstancedMeshUpdateTime.toFixed(2);
     }
 
     private onWindowResize(): void {
@@ -558,7 +579,23 @@ export class GlobeEngine {
 
         // Track propagation time
         this.propagationStartTime = performance.now();
-        this.entityManager.setTime(this.currentTime);
+
+        // Measure satellite update time
+        this.satelliteUpdateStartTime = performance.now();
+        this.entityManager.setTime(
+            this.currentTime,
+            this.satelliteUpdateStartTime,
+            this.satelliteUpdateEndTime,
+            this.instancedMeshUpdateStartTime,
+            this.instancedMeshUpdateEndTime
+        );
+        this.satelliteUpdateEndTime = performance.now();
+
+        // For now, mesh update time is the same as satellite update time
+        // since they happen together in the EntityManager
+        this.instancedMeshUpdateStartTime = this.satelliteUpdateStartTime;
+        this.instancedMeshUpdateEndTime = this.satelliteUpdateEndTime;
+
         this.propagationEndTime = performance.now();
 
         // Rotate the globe based on actual Earth rotation
@@ -608,6 +645,9 @@ export class GlobeEngine {
         this.renderStartTime = performance.now();
         this.renderer.render(this.scene, this.camera);
         this.renderEndTime = performance.now();
+
+        // Calculate timing results
+        this.calculateTimingResults();
 
         // Update timing display
         this.updateTimingDisplay();
@@ -675,7 +715,7 @@ export class GlobeEngine {
 
     public setTime(time: Date): void {
         this.currentTime = time;
-        this.entityManager.setTime(time);
+        this.entityManager.setTime(time, 0, 0, 0, 0);
     }
 
     public getCurrentTime(): Date {
@@ -970,12 +1010,12 @@ export class GlobeEngine {
 
     public setTimeFromTimeline(time: Date): void {
         this.currentTime = time;
-        this.entityManager.setTime(time);
+        this.entityManager.setTime(time, 0, 0, 0, 0);
     }
 
     public resetToCurrentTime(): void {
         this.currentTime = new Date();
-        this.entityManager.setTime(this.currentTime);
+        this.entityManager.setTime(this.currentTime, 0, 0, 0, 0);
     }
 
     public getTimelineRange(): { start: Date; end: Date } {

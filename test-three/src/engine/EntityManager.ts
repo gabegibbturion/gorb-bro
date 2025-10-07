@@ -205,7 +205,13 @@ export class EntityManager {
         satelliteIds.forEach((id) => this.removeSatellite(id));
     }
 
-    public update(time: Date): void {
+    public update(
+        time: Date,
+        _satelliteUpdateStartTime: number,
+        _satelliteUpdateEndTime: number,
+        _instancedMeshUpdateStartTime: number,
+        _instancedMeshUpdateEndTime: number
+    ): void {
         if (this.isUpdating || !this.meshUpdatesEnabled) return;
 
         this.isUpdating = true;
@@ -768,9 +774,9 @@ export class EntityManager {
 
         this.lastSatelliteCount = satellites.length;
     }
-    public setTime(time: Date): void {
+    public setTime(time: Date, satelliteUpdateStartTime: number, satelliteUpdateEndTime: number, instancedMeshUpdateStartTime: number, instancedMeshUpdateEndTime: number): void {
         this.currentTime = time;
-        this.update(time);
+        this.update(time, satelliteUpdateStartTime, satelliteUpdateEndTime, instancedMeshUpdateStartTime, instancedMeshUpdateEndTime);
     }
 
     public getCurrentTime(): Date {
@@ -1091,7 +1097,7 @@ export class EntityManager {
             this.updateParticleSystem(satellites);
         }
 
-        this.update(this.currentTime);
+        this.update(this.currentTime, 0, 0, 0, 0);
         // Restore the original mesh updates setting
         this.meshUpdatesEnabled = wasMeshUpdatesEnabled;
 

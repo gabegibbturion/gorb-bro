@@ -20,6 +20,7 @@ export interface SatelliteEntityOptions {
     trailColor?: number;
     showOrbit?: boolean;
     orbitColor?: number;
+    propagationMethod?: "satellite.js" | "k2";
 }
 
 export class SatelliteEntity {
@@ -39,6 +40,7 @@ export class SatelliteEntity {
     private lastUpdateTime: Date | null = null;
     private isSelected: boolean = false;
     private isVisible: boolean = true;
+    private k2State: number[] = [0, 0, 0, 0, 0, 0]; // [x, y, z, vx, vy, vz] for K2 propagation
 
     constructor(options: SatelliteEntityOptions) {
         this.id = Math.random().toString(36).substr(2, 9);
@@ -53,6 +55,7 @@ export class SatelliteEntity {
             trailColor: 0xffff00,
             showOrbit: false,
             orbitColor: 0x00ff00,
+            propagationMethod: "satellite.js",
             ...options,
         };
 
@@ -130,32 +133,117 @@ export class SatelliteEntity {
         }
 
         try {
-            // Propagate satellite position using satellite.js
-            const positionAndVelocity = satellite.propagate(this.satrec, time);
+            if (this.options.propagationMethod === "k2") {
+                this.updateK2Propagation(time);
+            } else {
+                this.updateSatelliteJsPropagation(time);
+            }
+        } catch (error) {
+            // Propagation error - satellite position not updated
+        }
+    }
+
+    private updateSatelliteJsPropagation(time: Date): void {
+        // Propagate satellite position using satellite.js
+        const positionAndVelocity = satellite.propagate(this.satrec, time);
+
+        if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
+            const pos = positionAndVelocity.position;
+            const vel = positionAndVelocity.velocity;
+
+            // Check for NaN values
+            if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
+                return;
+            }
+
+            // Convert from km to Three.js units (globe radius = 1)
+            // Earth radius is ~6371 km, so scale factor is 1/6371
+            const earthRadiusKm = 6371;
+            const scaleFactor = 1 / earthRadiusKm;
+
+            this.currentPosition.set(pos.x * scaleFactor, pos.y * scaleFactor, pos.z * scaleFactor);
+            this.currentVelocity.set(vel.x * scaleFactor, vel.y * scaleFactor, vel.z * scaleFactor);
+
+            this.lastUpdateTime = time;
+        }
+    }
+
+    private updateK2Propagation(time: Date): void {
+        // Initialize K2 state if needed
+        if (this.k2State[0] === 0 && this.k2State[1] === 0 && this.k2State[2] === 0) {
+            this.initializeK2State();
+        }
+
+        // Calculate time step in seconds
+        const timeStep = (time.getTime() - (this.lastUpdateTime?.getTime() || time.getTime())) / 1000;
+
+        if (Math.abs(timeStep) < 0.001) return; // Skip very small time steps
+
+        // Apply K2 propagation
+        this.propagateK2(timeStep);
+
+        // Update current position and velocity
+        const earthRadiusKm = 6371;
+        const scaleFactor = 1 / earthRadiusKm;
+
+        this.currentPosition.set(this.k2State[0] * scaleFactor, this.k2State[1] * scaleFactor, this.k2State[2] * scaleFactor);
+
+        this.currentVelocity.set(this.k2State[3] * scaleFactor, this.k2State[4] * scaleFactor, this.k2State[5] * scaleFactor);
+
+        this.lastUpdateTime = time;
+    }
+
+    private initializeK2State(): void {
+        // Initialize K2 state from current satellite.js position
+        try {
+            const now = new Date();
+            const positionAndVelocity = satellite.propagate(this.satrec, now);
 
             if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
                 const pos = positionAndVelocity.position;
                 const vel = positionAndVelocity.velocity;
 
-                // Check for NaN values
-                if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
-                    return;
-                }
-
-                // Convert from km to Three.js units (globe radius = 1)
-                // Earth radius is ~6371 km, so scale factor is 1/6371
-                const earthRadiusKm = 6371;
-                const scaleFactor = 1 / earthRadiusKm;
-
-                this.currentPosition.set(pos.x * scaleFactor, pos.y * scaleFactor, pos.z * scaleFactor);
-
-                this.currentVelocity.set(vel.x * scaleFactor, vel.y * scaleFactor, vel.z * scaleFactor);
-
-                this.lastUpdateTime = time;
+                // Store in km units for K2 propagation
+                this.k2State[0] = pos.x;
+                this.k2State[1] = pos.y;
+                this.k2State[2] = pos.z;
+                this.k2State[3] = vel.x;
+                this.k2State[4] = vel.y;
+                this.k2State[5] = vel.z;
             }
         } catch (error) {
-            // Propagation error - satellite position not updated
+            // Fallback to default state
+            this.k2State = [7000, 0, 0, 0, 7.5, 0]; // Default LEO orbit
         }
+    }
+
+    private propagateK2(dt: number): void {
+        const MU_EARTH = 3.986004418e5; // Earth's gravitational parameter in km³/s²
+        const halfDT = dt * 0.5;
+
+        // K1 calculation
+        const k1 = [this.k2State[0], this.k2State[1], this.k2State[2]];
+        const mag1 = -MU_EARTH / Math.pow(k1[0] * k1[0] + k1[1] * k1[1] + k1[2] * k1[2], 1.5);
+        k1[0] *= mag1;
+        k1[1] *= mag1;
+        k1[2] *= mag1;
+
+        // K2 calculation
+        const k2 = [this.k2State[0] + dt * k1[0], this.k2State[1] + dt * k1[1], this.k2State[2] + dt * k1[2]];
+        const mag2 = -MU_EARTH / Math.pow(k2[0] * k2[0] + k2[1] * k2[1] + k2[2] * k2[2], 1.5);
+        k2[0] *= mag2;
+        k2[1] *= mag2;
+        k2[2] *= mag2;
+
+        // Update velocities
+        this.k2State[3] += halfDT * (k1[0] + k2[0]);
+        this.k2State[4] += halfDT * (k1[1] + k2[1]);
+        this.k2State[5] += halfDT * (k1[2] + k2[2]);
+
+        // Update positions
+        this.k2State[0] += dt * this.k2State[3];
+        this.k2State[1] += dt * this.k2State[4];
+        this.k2State[2] += dt * this.k2State[5];
     }
 
     // No longer returns a mesh - satellites are just data points
@@ -257,6 +345,18 @@ export class SatelliteEntity {
 
     public getColor(): number {
         return this.options.color;
+    }
+
+    public setPropagationMethod(method: "satellite.js" | "k2"): void {
+        this.options.propagationMethod = method;
+        // Reset K2 state when switching methods
+        if (method === "k2") {
+            this.k2State = [0, 0, 0, 0, 0, 0];
+        }
+    }
+
+    public getPropagationMethod(): "satellite.js" | "k2" {
+        return this.options.propagationMethod;
     }
 
     public dispose(): void {
