@@ -83,6 +83,8 @@ let satelliteData: Array<{
   state: number[];
   period: number;
 }> = [];
+let satRecs: satellite.SatRec[] = [];
+
 
 // Initialize the application
 async function init() {
@@ -268,8 +270,7 @@ function updateSatelliteJSPosition(index: number) {
   if (!satelliteData[index]) return;
 
   try {
-    const satData = satelliteData[index];
-    const tle = satellite.twoline2satrec(satData.tle.line1, satData.tle.line2);
+    const tle = satRecs[index];
 
     // Use global simulation time
     const positionAndVelocity = satellite.propagate(tle, simulationTime);
@@ -504,7 +505,7 @@ function createUI() {
   document.getElementById('clear-satellites')?.addEventListener('click', clearSatellites);
   document.getElementById('propagation-method')?.addEventListener('change', onPropagationMethodChange);
   document.getElementById('load-100-tles')?.addEventListener('click', () => loadTLEs(100));
-  document.getElementById('load-1000-tles')?.addEventListener('click', () => loadTLEs(1000));
+  document.getElementById('load-1000-tles')?.addEventListener('click', () => loadTLEs(10000));
   document.getElementById('load-all-tles')?.addEventListener('click', () => loadTLEs(0));
   document.getElementById('load-turion-api')?.addEventListener('click', loadFromTurionAPI);
   document.getElementById('time-multiplier')?.addEventListener('input', onTimeMultiplierChange);
@@ -836,6 +837,9 @@ async function loadTLEs(count: number) {
             state: [x, y, z, vx, vy, vz],
             period: period
           });
+          // satRecs = satellites.map(sat =>
+          //   satellite.twoline2satrec(sat.tle.line1, sat.tle.line2)
+          // );
         }
       } catch (error) {
         console.warn(`Failed to process TLE ${i}:`, error);
