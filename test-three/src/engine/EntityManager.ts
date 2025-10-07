@@ -23,7 +23,6 @@ export class EntityManager {
     private currentTime: Date = new Date();
     private isUpdating: boolean = false;
     private meshUpdatesEnabled: boolean = true; // Control mesh updates
-    private globalPropagatorType: "satellitejs" | "k2" = "satellitejs"; // Global propagator type
 
     // Instanced buffer geometry for all satellites
     private instancedMesh: THREE.InstancedMesh | null = null;
@@ -74,7 +73,6 @@ export class EntityManager {
         const satelliteOptions: SatelliteEntityOptions = {
             name,
             satrec,
-            useK2Propagator: this.globalPropagatorType === "k2",
             ...options,
         };
 
@@ -1037,20 +1035,6 @@ export class EntityManager {
 
     public getRenderingSystem(): RenderingSystem {
         return this.options.renderingSystem;
-    }
-
-    public setPropagatorType(propagatorType: "satellitejs" | "k2"): void {
-        // Update global propagator type
-        this.globalPropagatorType = propagatorType;
-
-        // Update all existing satellites to use the new propagator type
-        this.satellites.forEach((satellite) => {
-            satellite.setPropagatorType(propagatorType === "k2");
-        });
-    }
-
-    public getPropagatorType(): "satellitejs" | "k2" {
-        return this.globalPropagatorType;
     }
 
     public setParticleSize(size: number): void {

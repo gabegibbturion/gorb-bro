@@ -20,7 +20,6 @@ export interface SatelliteEntityOptions {
     trailColor?: number;
     showOrbit?: boolean;
     orbitColor?: number;
-    useK2Propagator?: boolean; // Use K2 propagator instead of satellite.js
 }
 
 export class SatelliteEntity {
@@ -41,10 +40,6 @@ export class SatelliteEntity {
     private isSelected: boolean = false;
     private isVisible: boolean = true;
 
-    // K2 propagator state
-    private k2State: number[] = [0, 0, 0, 0, 0, 0]; // [x, y, z, vx, vy, vz] in Earth radii
-    private k2Initialized: boolean = false;
-
     constructor(options: SatelliteEntityOptions) {
         this.id = Math.random().toString(36).substr(2, 9);
         this.name = options.name;
@@ -58,7 +53,6 @@ export class SatelliteEntity {
             trailColor: 0xffff00,
             showOrbit: false,
             orbitColor: 0x00ff00,
-            useK2Propagator: false, // Default to satellite.js
             ...options,
         };
 
@@ -128,71 +122,6 @@ export class SatelliteEntity {
         };
     }
 
-    private initializeK2State(): void {
-        if (this.k2Initialized) return;
-
-        try {
-            // Get initial position from satellite.js
-            const positionAndVelocity = satellite.propagate(this.satrec, new Date());
-
-            if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
-                const pos = positionAndVelocity.position;
-                const vel = positionAndVelocity.velocity;
-
-                // Convert from km to Earth radii
-                const earthRadiusKm = 6371;
-                const scaleFactor = 1 / earthRadiusKm;
-
-                this.k2State[0] = pos.x * scaleFactor;
-                this.k2State[1] = pos.y * scaleFactor;
-                this.k2State[2] = pos.z * scaleFactor;
-                this.k2State[3] = vel.x * scaleFactor;
-                this.k2State[4] = vel.y * scaleFactor;
-                this.k2State[5] = vel.z * scaleFactor;
-
-                this.k2Initialized = true;
-            }
-        } catch (error) {
-            console.warn(`Failed to initialize K2 state for satellite ${this.name}:`, error);
-        }
-    }
-
-    private k2Propagate(dt: number): void {
-        if (!this.k2Initialized) {
-            this.initializeK2State();
-            return;
-        }
-
-        // K2 (Runge-Kutta 2nd order) propagator
-        const MU_EARTH = 0.000001536328985; // G*MassOfEarth in units of earth radius
-
-        const halfDT = dt * 0.5;
-
-        // K1 step
-        const k1 = [this.k2State[0], this.k2State[1], this.k2State[2]];
-        const mag1 = -MU_EARTH / Math.pow(k1[0] * k1[0] + k1[1] * k1[1] + k1[2] * k1[2], 1.5);
-        k1[0] *= mag1;
-        k1[1] *= mag1;
-        k1[2] *= mag1;
-
-        // K2 step
-        const k2 = [this.k2State[0] + dt * k1[0], this.k2State[1] + dt * k1[1], this.k2State[2] + dt * k1[2]];
-        const mag2 = -MU_EARTH / Math.pow(k2[0] * k2[0] + k2[1] * k2[1] + k2[2] * k2[2], 1.5);
-        k2[0] *= mag2;
-        k2[1] *= mag2;
-        k2[2] *= mag2;
-
-        // Update velocity
-        this.k2State[3] += halfDT * (k1[0] + k2[0]);
-        this.k2State[4] += halfDT * (k1[1] + k2[1]);
-        this.k2State[5] += halfDT * (k1[2] + k2[2]);
-
-        // Update position
-        this.k2State[0] += dt * this.k2State[3];
-        this.k2State[1] += dt * this.k2State[4];
-        this.k2State[2] += dt * this.k2State[5];
-    }
-
     public update(time: Date): void {
         // Skip update if time hasn't changed significantly (performance optimization)
         // Reduced threshold from 100ms to 50ms for smoother updates
@@ -200,44 +129,32 @@ export class SatelliteEntity {
             return;
         }
 
-        if (this.options.useK2Propagator) {
-            // Use K2 propagator
-            const dt = this.lastUpdateTime ? (time.getTime() - this.lastUpdateTime.getTime()) / 1000 : 0.016; // Default 16ms
-            this.k2Propagate(dt);
+        try {
+            // Propagate satellite position using satellite.js
+            const positionAndVelocity = satellite.propagate(this.satrec, time);
 
-            // Update position and velocity from K2 state
-            this.currentPosition.set(this.k2State[0], this.k2State[1], this.k2State[2]);
-            this.currentVelocity.set(this.k2State[3], this.k2State[4], this.k2State[5]);
+            if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
+                const pos = positionAndVelocity.position;
+                const vel = positionAndVelocity.velocity;
 
-            this.lastUpdateTime = time;
-        } else {
-            // Use satellite.js propagator
-            try {
-                const positionAndVelocity = satellite.propagate(this.satrec, time);
-
-                if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
-                    const pos = positionAndVelocity.position;
-                    const vel = positionAndVelocity.velocity;
-
-                    // Check for NaN values
-                    if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
-                        return;
-                    }
-
-                    // Convert from km to Three.js units (globe radius = 1)
-                    // Earth radius is ~6371 km, so scale factor is 1/6371
-                    const earthRadiusKm = 6371;
-                    const scaleFactor = 1 / earthRadiusKm;
-
-                    this.currentPosition.set(pos.x * scaleFactor, pos.y * scaleFactor, pos.z * scaleFactor);
-
-                    this.currentVelocity.set(vel.x * scaleFactor, vel.y * scaleFactor, vel.z * scaleFactor);
-
-                    this.lastUpdateTime = time;
+                // Check for NaN values
+                if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
+                    return;
                 }
-            } catch (error) {
-                // Propagation error - satellite position not updated
+
+                // Convert from km to Three.js units (globe radius = 1)
+                // Earth radius is ~6371 km, so scale factor is 1/6371
+                const earthRadiusKm = 6371;
+                const scaleFactor = 1 / earthRadiusKm;
+
+                this.currentPosition.set(pos.x * scaleFactor, pos.y * scaleFactor, pos.z * scaleFactor);
+
+                this.currentVelocity.set(vel.x * scaleFactor, vel.y * scaleFactor, vel.z * scaleFactor);
+
+                this.lastUpdateTime = time;
             }
+        } catch (error) {
+            // Propagation error - satellite position not updated
         }
     }
 
@@ -287,18 +204,6 @@ export class SatelliteEntity {
             longitude: satellite.degreesLong(positionGd.longitude),
             altitude: positionGd.height,
         };
-    }
-
-    public getPropagatorType(): string {
-        return this.options.useK2Propagator ? "K2" : "satellite.js";
-    }
-
-    public setPropagatorType(useK2: boolean): void {
-        this.options.useK2Propagator = useK2;
-        // Reset K2 state if switching propagators
-        if (useK2) {
-            this.k2Initialized = false;
-        }
     }
 
     public getPosition(): THREE.Vector3 {
