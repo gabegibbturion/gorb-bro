@@ -44,6 +44,17 @@ export class EntityManager {
     private meshUpdatesEnabled: boolean = true; // Control mesh updates
     private defaultPropagationMethod: "satellite.js" | "k2" = "satellite.js"; // Default propagation method for new satellites
 
+    // Web worker for propagation with shared memory
+    private propagationWorker: Worker | null = null;
+    private pendingBatches: Map<number, { resolve: (result: any) => void; reject: (error: any) => void }> = new Map();
+
+    // Shared memory for direct access between main thread and worker
+    private sharedArrayBuffer: SharedArrayBuffer | null = null;
+    private sharedPositions: Float32Array | null = null;
+    private sharedColors: Float32Array | null = null;
+    private sharedVisibility: Float32Array | null = null;
+    private sharedSizes: Float32Array | null = null;
+
     // Direct position and color arrays for maximum performance
     private positions: Float32Array;
     private colors: Float32Array;
@@ -92,6 +103,12 @@ export class EntityManager {
 
         // Initialize all arrays to hidden state
         this.initializeArrays();
+
+        // Initialize shared memory
+        this.initializeSharedMemory();
+
+        // Initialize web worker
+        this.initializeWorker();
     }
 
     private initializeArrays(): void {
@@ -110,6 +127,162 @@ export class EntityManager {
             // Default size
             this.sizes[i] = 1;
         }
+    }
+
+    private initializeSharedMemory(): void {
+        try {
+            // Calculate total memory needed
+            const positionsSize = this.options.maxSatellites * 3 * 4; // 3 floats * 4 bytes
+            const colorsSize = this.options.maxSatellites * 3 * 4;
+            const visibilitySize = this.options.maxSatellites * 4;
+            const sizesSize = this.options.maxSatellites * 4;
+
+            const totalSize = positionsSize + colorsSize + visibilitySize + sizesSize;
+
+            // Create SharedArrayBuffer
+            this.sharedArrayBuffer = new SharedArrayBuffer(totalSize);
+
+            // Create views into the shared memory
+            let offset = 0;
+            this.sharedPositions = new Float32Array(this.sharedArrayBuffer, offset, this.options.maxSatellites * 3);
+            offset += positionsSize;
+
+            this.sharedColors = new Float32Array(this.sharedArrayBuffer, offset, this.options.maxSatellites * 3);
+            offset += colorsSize;
+
+            this.sharedVisibility = new Float32Array(this.sharedArrayBuffer, offset, this.options.maxSatellites);
+            offset += visibilitySize;
+
+            this.sharedSizes = new Float32Array(this.sharedArrayBuffer, offset, this.options.maxSatellites);
+
+            // Initialize shared memory to hidden state
+            this.initializeSharedArrays();
+
+            console.log('Shared memory initialized successfully');
+        } catch (error) {
+            console.error('Failed to initialize shared memory:', error);
+            // Fallback to regular arrays
+            this.sharedArrayBuffer = null;
+        }
+    }
+
+    private initializeSharedArrays(): void {
+        if (!this.sharedPositions || !this.sharedColors || !this.sharedVisibility || !this.sharedSizes) return;
+
+        for (let i = 0; i < this.options.maxSatellites; i++) {
+            const i3 = i * 3;
+            // Hidden position (far away)
+            this.sharedPositions[i3] = 10000;
+            this.sharedPositions[i3 + 1] = 10000;
+            this.sharedPositions[i3 + 2] = 10000;
+            // Black color (invisible)
+            this.sharedColors[i3] = 0;
+            this.sharedColors[i3 + 1] = 0;
+            this.sharedColors[i3 + 2] = 0;
+            // Hidden
+            this.sharedVisibility[i] = 0;
+            // Default size
+            this.sharedSizes[i] = 1;
+        }
+    }
+
+    private initializeWorker(): void {
+        try {
+            // Create worker from the worker file
+            this.propagationWorker = new Worker(new URL('../workers/satellitePropagationWorker.ts', import.meta.url), {
+                type: 'module'
+            });
+
+            // Set up worker message handling
+            this.propagationWorker.onmessage = (event) => {
+                const { type, data } = event.data;
+
+                switch (type) {
+                    case 'INITIALIZED':
+                        console.log('Propagation worker initialized');
+                        // Set up shared memory in worker
+                        this.setupWorkerSharedMemory();
+                        break;
+
+                    case 'SHARED_MEMORY_SET':
+                        console.log('Shared memory set up in worker');
+                        break;
+
+                    case 'BATCH_COMPLETE':
+                        this.handleBatchComplete(data);
+                        break;
+
+                    case 'PROPAGATION_ERROR':
+                        console.error('Propagation error:', data.error);
+                        this.handlePropagationError(data);
+                        break;
+                }
+            };
+
+            this.propagationWorker.onerror = (error) => {
+                console.error('Worker error:', error);
+            };
+
+            // Initialize the worker
+            this.propagationWorker.postMessage({ type: 'INITIALIZE' });
+
+        } catch (error) {
+            console.error('Failed to initialize propagation worker:', error);
+            // Fallback to synchronous processing
+            this.propagationWorker = null;
+        }
+    }
+
+    private setupWorkerSharedMemory(): void {
+        if (!this.propagationWorker || !this.sharedArrayBuffer) return;
+
+        // Create shared memory layout for worker
+        const sharedMemoryLayout = {
+            positions: this.sharedPositions!,
+            colors: this.sharedColors!,
+            visibility: this.sharedVisibility!,
+            sizes: this.sharedSizes!,
+            satelliteData: this.getAllSatellites(),
+            maxSatellites: this.options.maxSatellites
+        };
+
+        // Send shared memory to worker
+        this.propagationWorker.postMessage({
+            type: 'SET_SHARED_MEMORY',
+            data: sharedMemoryLayout
+        });
+    }
+
+    private handleBatchComplete(data: any): void {
+        const { batchIndex, successCount } = data;
+
+        // Copy from shared memory to main arrays for rendering
+        this.copyFromSharedMemory();
+
+        // Resolve the pending batch
+        const pending = this.pendingBatches.get(batchIndex);
+        if (pending) {
+            pending.resolve({ batchIndex, successCount });
+            this.pendingBatches.delete(batchIndex);
+        }
+    }
+
+    private copyFromSharedMemory(): void {
+        if (!this.sharedPositions || !this.sharedColors || !this.sharedVisibility || !this.sharedSizes) return;
+
+        // Direct copy from shared memory to main arrays
+        this.positions.set(this.sharedPositions);
+        this.colors.set(this.sharedColors);
+        this.visibility.set(this.sharedVisibility);
+        this.sizes.set(this.sharedSizes);
+    }
+
+    private handlePropagationError(error: any): void {
+        // Reject all pending batches
+        for (const [, pending] of this.pendingBatches) {
+            pending.reject(new Error(error.error || 'Propagation failed'));
+        }
+        this.pendingBatches.clear();
     }
 
     public addSatellite(orbitalElements: OrbitalElements, options?: Partial<SatelliteData>): SatelliteData | null {
@@ -381,8 +554,8 @@ export class EntityManager {
         this.isUpdating = true;
         this.currentTime = time;
 
-        // Direct propagation and array updates for maximum performance
-        this.updateSatellitePositions(time);
+        // Use worker-based propagation for better performance
+        this.updateSatellitePositionsWithWorker(time);
 
         // Update instanced mesh positions and colors
         this.updateInstancedMesh();
@@ -395,27 +568,92 @@ export class EntityManager {
         this.isUpdating = false;
     }
 
-    private updateSatellitePositions(time: Date): void {
+    private updateSatellitePositionsWithWorker(time: Date): void {
         const satellites = this.getAllSatellites();
 
-        satellites.forEach((satelliteData, index) => {
+        if (satellites.length === 0) return;
+
+        // If worker is not available, fall back to synchronous processing
+        if (!this.propagationWorker) {
+            this.updateSatellitePositionsSync(time);
+            return;
+        }
+
+        // Process satellites in batches of 1000 using worker
+        const batchSize = 1000;
+
+        for (let i = 0; i < satellites.length; i += batchSize) {
+            const batch = satellites.slice(i, i + batchSize);
+            this.processSatelliteBatchWithWorker(batch, time, i);
+        }
+    }
+
+    private updateSatellitePositionsSync(time: Date): void {
+        const satellites = this.getAllSatellites();
+
+        if (satellites.length === 0) return;
+
+        // Process satellites in batches of 1000 synchronously
+        const batchSize = 1000;
+
+        for (let i = 0; i < satellites.length; i += batchSize) {
+            const batch = satellites.slice(i, i + batchSize);
+            this.processSatelliteBatchSync(batch, time, i);
+        }
+    }
+
+    private processSatelliteBatchWithWorker(
+        satellites: SatelliteData[],
+        time: Date,
+        startIndex: number
+    ): void {
+        if (!this.propagationWorker || !this.sharedArrayBuffer) {
+            this.processSatelliteBatchSync(satellites, time, startIndex);
+            return;
+        }
+
+        // Create batch data for worker (no need to send satellite data - it's in shared memory)
+        const batchData = {
+            batchIndex: Math.floor(startIndex / 1000),
+            startIndex: startIndex,
+            batchSize: satellites.length,
+            time: time.getTime()
+        };
+
+        // Send batch to worker
+        this.propagationWorker.postMessage({
+            type: 'PROPAGATE_BATCH',
+            data: batchData
+        });
+    }
+
+    private processSatelliteBatchSync(
+        satellites: SatelliteData[],
+        time: Date,
+        startIndex: number
+    ): void {
+        // Process each satellite in the batch synchronously
+        for (let i = 0; i < satellites.length; i++) {
+            const satelliteData = satellites[i];
+            const globalIndex = startIndex + i;
+
             // Skip update if time hasn't changed significantly
             if (satelliteData.lastUpdateTime && Math.abs(time.getTime() - satelliteData.lastUpdateTime.getTime()) < 50) {
-                return;
+                continue;
             }
 
             let propagationSuccess = false;
 
-            // Direct propagation based on method - now directly modifies positions array
+            // Direct propagation based on method - directly modifies positions array
             if (satelliteData.propagationMethod === "k2") {
-                propagationSuccess = this.propagateK2(satelliteData, time, index);
+                propagationSuccess = this.propagateK2(satelliteData, time, globalIndex);
             } else {
-                propagationSuccess = this.propagateSatelliteJs(satelliteData, time, index);
+                propagationSuccess = this.propagateSatelliteJs(satelliteData, time, globalIndex);
             }
 
             if (propagationSuccess) {
                 // Update color, visibility, and size
-                const i3 = index * 3;
+                const i3 = globalIndex * 3;
 
                 // Update color
                 this.tempColor.setHex(satelliteData.color);
@@ -424,16 +662,18 @@ export class EntityManager {
                 this.colors[i3 + 2] = this.tempColor.b;
 
                 // Update visibility
-                this.visibility[index] = satelliteData.isVisible ? 1 : 0;
+                this.visibility[globalIndex] = satelliteData.isVisible ? 1 : 0;
 
                 // Update size
-                this.sizes[index] = satelliteData.size;
+                this.sizes[globalIndex] = satelliteData.size;
 
                 // Update last update time
                 satelliteData.lastUpdateTime = time;
             }
-        });
+        }
     }
+
+    // Removed sync fallback method - using async batches only
 
     private updateInstancedMesh(): void {
         const satellites = this.getAllSatellites();
@@ -955,6 +1195,20 @@ export class EntityManager {
     public dispose(): void {
         this.clearAll();
         this.satellites.clear();
+
+        // Clean up worker
+        if (this.propagationWorker) {
+            this.propagationWorker.terminate();
+            this.propagationWorker = null;
+        }
+        this.pendingBatches.clear();
+
+        // Clean up shared memory
+        this.sharedArrayBuffer = null;
+        this.sharedPositions = null;
+        this.sharedColors = null;
+        this.sharedVisibility = null;
+        this.sharedSizes = null;
 
         // Clean up instanced mesh
         if (this.instancedMesh) {
