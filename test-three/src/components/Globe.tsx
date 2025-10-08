@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { RenderingSystem } from "../engine/EntityManager";
+// import type { RenderingSystem } from "../engine/EntityManager"; // Only instanced supported
 import { GlobeEngine, GlobeType } from "../engine/GlobeEngine";
 import type { ClassicalOrbitalElements } from "../engine/OrbitalElements";
 import { OrbitalElementsGenerator } from "../engine/OrbitalElements";
@@ -34,7 +34,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [satelliteCountInput, setSatelliteCountInput] = useState<any>(100);
     const [selectedEntity, setSelectedEntity] = useState<any>(null);
     const [showSidePanel, setShowSidePanel] = useState(false);
-    const [renderingSystem, setRenderingSystem] = useState<RenderingSystem>("instanced");
+    // const [renderingSystem, setRenderingSystem] = useState<RenderingSystem>("instanced"); // Only instanced supported
     const [tleLoading, setTleLoading] = useState(false);
     const [occlusionCulling, setOcclusionCulling] = useState(true);
     const [globeVisible, setGlobeVisible] = useState(true);
@@ -62,7 +62,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             autoRotate: false, // Disable auto-rotation
             rotationSpeed: 0.0005,
             maxSatellites: 2000000,
-            renderingSystem: renderingSystem,
+            // renderingSystem: renderingSystem, // Only instanced supported
             globeType: globeType,
             orbitRenderingSystem: orbitRenderingSystem,
             maxOrbits: 1000000,
@@ -494,9 +494,10 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
 
     const handleSatelliteSizeChange = (newSize: number) => {
         setSatelliteSize(newSize);
-        if (engineRef.current) {
-            engineRef.current.setSatPointsSize(newSize);
-        }
+        // Satellite size is handled by the instanced mesh system
+        // if (engineRef.current) {
+        //     engineRef.current.setSatPointsSize(newSize);
+        // }
     };
 
     return (
@@ -651,48 +652,11 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                         </div>
                     </div>
 
-                    {/* Rendering System */}
+                    {/* Rendering System - Only instanced supported */}
                     <div style={{ marginBottom: "8px" }}>
                         <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Rendering:</div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "3px" }}>
-                            {[
-                                { value: "particle", label: "Particle", description: "Basic" },
-                                { value: "instanced", label: "Instanced", description: "High-perf" },
-                                { value: "satpoints", label: "SatPoints", description: "Optimized" },
-                            ].map((option) => (
-                                <label
-                                    key={option.value}
-                                    style={{
-                                        display: "flex",
-                                        flexDirection: "column",
-                                        alignItems: "center",
-                                        padding: "4px",
-                                        cursor: "pointer",
-                                        backgroundColor: renderingSystem === option.value ? "rgba(76, 175, 80, 0.2)" : "rgba(255, 255, 255, 0.05)",
-                                        borderRadius: "2px",
-                                        border: renderingSystem === option.value ? "1px solid #4CAF50" : "1px solid transparent",
-                                        fontSize: "15px",
-                                        transition: "all 0.2s ease",
-                                    }}
-                                >
-                                    <input
-                                        type="radio"
-                                        name="renderingSystem"
-                                        value={option.value}
-                                        checked={renderingSystem === option.value}
-                                        onChange={(e) => {
-                                            const newSystem = e.target.value as RenderingSystem;
-                                            setRenderingSystem(newSystem);
-                                            if (engineRef.current) {
-                                                engineRef.current.setRenderingSystem(newSystem);
-                                            }
-                                        }}
-                                        style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
-                                    />
-                                    <div style={{ fontWeight: "bold", color: renderingSystem === option.value ? "#4CAF50" : "#fff", fontSize: "15px" }}>{option.label}</div>
-                                    <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
-                                </label>
-                            ))}
+                        <div style={{ padding: "8px", backgroundColor: "rgba(76, 175, 80, 0.1)", borderRadius: "3px", fontSize: "15px", color: "#4CAF50" }}>
+                            Instanced (High Performance)
                         </div>
                     </div>
 

@@ -2,15 +2,15 @@ import * as satellite from "satellite.js";
 import * as THREE from "three";
 import type { OrbitalElements } from "./OrbitalElements";
 import { OrbitalElementsGenerator } from "./OrbitalElements";
-import { SatPoints } from "./SatPoints";
+// import { SatPoints } from "./SatPoints"; // Removed - only instanced rendering supported
 
-export type RenderingSystem = "particle" | "instanced" | "satpoints";
+export type RenderingSystem = "instanced";
 
 export interface EntityManagerOptions {
     maxSatellites?: number;
     autoCleanup?: boolean;
     updateInterval?: number;
-    renderingSystem?: RenderingSystem; // Single parameter to control rendering system
+    // renderingSystem?: RenderingSystem; // Only instanced rendering supported
     enableOcclusionCulling?: boolean; // Toggle occlusion culling
     particleSize?: number; // Size of particles
 }
@@ -56,13 +56,13 @@ export class EntityManager {
     private satelliteMaterial: THREE.RawShaderMaterial | null = null;
     private currentSatelliteCount: number = 0;
 
-    // Particle system (legacy)
-    private particleSystem: THREE.Points | null = null;
-    private particleGeometry: THREE.BufferGeometry | null = null;
-    private particleMaterial: THREE.PointsMaterial | null = null;
+    // Particle system - removed
+    // private particleSystem: THREE.Points | null = null;
+    // private particleGeometry: THREE.BufferGeometry | null = null;
+    // private particleMaterial: THREE.PointsMaterial | null = null;
 
-    // SatPoints system
-    private satPoints: SatPoints | null = null;
+    // SatPoints system - removed
+    // private satPoints: SatPoints | null = null;
 
     // Event callbacks
     private onSatelliteAdded?: (satellite: SatelliteData) => void;
@@ -71,7 +71,6 @@ export class EntityManager {
 
     private lastSatelliteCount: number = 0;
     private tempColor: THREE.Color = new THREE.Color(); // Reuse color object
-    private tempPosition: THREE.Vector3 = new THREE.Vector3(); // Reuse position object
 
     constructor(scene: THREE.Scene, options: EntityManagerOptions = {}) {
         this.scene = scene;
@@ -79,7 +78,7 @@ export class EntityManager {
             maxSatellites: 100000,
             autoCleanup: true,
             updateInterval: 1000, // 1 second
-            renderingSystem: "instanced", // Default to instanced mesh
+            // renderingSystem: "instanced", // Only instanced mesh supported
             enableOcclusionCulling: false, // Default to disabled
             particleSize: 0.01, // Default particle size
             ...options,
@@ -262,7 +261,7 @@ export class EntityManager {
     }
 
     // Direct propagation methods for maximum performance
-    private propagateSatelliteJs(satelliteData: SatelliteData, time: Date): THREE.Vector3 | null {
+    private propagateSatelliteJs(satelliteData: SatelliteData, time: Date, index: number): boolean {
         try {
             const positionAndVelocity = satellite.propagate(satelliteData.satrec, time);
 
@@ -271,28 +270,28 @@ export class EntityManager {
 
                 // Check for NaN values
                 if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
-                    return null;
+                    return false;
                 }
 
                 // Convert from km to Three.js units (globe radius = 1)
                 const earthRadiusKm = 6371;
                 const scaleFactor = 1 / earthRadiusKm;
 
-                this.tempPosition.set(
-                    pos.x * scaleFactor,
-                    pos.y * scaleFactor,
-                    pos.z * scaleFactor
-                );
+                // Directly update the positions array
+                const i3 = index * 3;
+                this.positions[i3] = pos.x * scaleFactor;
+                this.positions[i3 + 1] = pos.y * scaleFactor;
+                this.positions[i3 + 2] = pos.z * scaleFactor;
 
-                return this.tempPosition;
+                return true;
             }
         } catch (error) {
             // Propagation error
         }
-        return null;
+        return false;
     }
 
-    private propagateK2(satelliteData: SatelliteData, time: Date): THREE.Vector3 | null {
+    private propagateK2(satelliteData: SatelliteData, time: Date, index: number): boolean {
         // Initialize K2 state if needed
         if (satelliteData.k2State[0] === 0 && satelliteData.k2State[1] === 0 && satelliteData.k2State[2] === 0) {
             this.initializeK2State(satelliteData);
@@ -301,22 +300,21 @@ export class EntityManager {
         // Calculate time step in seconds
         const timeStep = (time.getTime() - (satelliteData.lastUpdateTime?.getTime() || time.getTime())) / 1000;
 
-        if (Math.abs(timeStep) < 0.001) return null; // Skip very small time steps
+        if (Math.abs(timeStep) < 0.001) return false; // Skip very small time steps
 
         // Apply K2 propagation
         this.applyK2Propagation(satelliteData, timeStep);
 
-        // Convert to Three.js units
+        // Convert to Three.js units and directly update positions array
         const earthRadiusKm = 6371;
         const scaleFactor = 1 / earthRadiusKm;
 
-        this.tempPosition.set(
-            satelliteData.k2State[0] * scaleFactor,
-            satelliteData.k2State[1] * scaleFactor,
-            satelliteData.k2State[2] * scaleFactor
-        );
+        const i3 = index * 3;
+        this.positions[i3] = satelliteData.k2State[0] * scaleFactor;
+        this.positions[i3 + 1] = satelliteData.k2State[1] * scaleFactor;
+        this.positions[i3 + 2] = satelliteData.k2State[2] * scaleFactor;
 
-        return this.tempPosition;
+        return true;
     }
 
     private initializeK2State(satelliteData: SatelliteData): void {
@@ -406,23 +404,18 @@ export class EntityManager {
                 return;
             }
 
-            let position: THREE.Vector3 | null = null;
+            let propagationSuccess = false;
 
-            // Direct propagation based on method
+            // Direct propagation based on method - now directly modifies positions array
             if (satelliteData.propagationMethod === "k2") {
-                position = this.propagateK2(satelliteData, time);
+                propagationSuccess = this.propagateK2(satelliteData, time, index);
             } else {
-                position = this.propagateSatelliteJs(satelliteData, time);
+                propagationSuccess = this.propagateSatelliteJs(satelliteData, time, index);
             }
 
-            if (position) {
-                // Direct array manipulation for maximum performance
+            if (propagationSuccess) {
+                // Update color, visibility, and size
                 const i3 = index * 3;
-
-                // Update position
-                this.positions[i3] = position.x;
-                this.positions[i3 + 1] = position.y;
-                this.positions[i3 + 2] = position.z;
 
                 // Update color
                 this.tempColor.setHex(satelliteData.color);
@@ -444,19 +437,8 @@ export class EntityManager {
 
     private updateInstancedMesh(): void {
         const satellites = this.getAllSatellites();
-
-        switch (this.options.renderingSystem) {
-            case "satpoints":
-                this.updateSatPointsSystem(satellites);
-                break;
-            case "instanced":
-                this.updateInstancedMeshSystem(satellites);
-                break;
-            case "particle":
-            default:
-                this.updateParticleSystem(satellites);
-                break;
-        }
+        // Only instanced rendering supported
+        this.updateInstancedMeshSystem(satellites);
     }
 
     private updateInstancedMeshSystem(satellites: SatelliteData[]): void {
@@ -486,55 +468,9 @@ export class EntityManager {
         this.updateInstanceData(satellites);
     }
 
-    private updateSatPointsSystem(satellites: SatelliteData[]): void {
-        // Remove existing SatPoints if no satellites
-        if (satellites.length === 0) {
-            if (this.satPoints) {
-                this.scene.remove(this.satPoints);
-                this.satPoints = null;
-                this.currentSatelliteCount = 0;
-            }
-            return;
-        }
+    // SatPoints system removed
 
-        // Only create SatPoints if it doesn't exist
-        if (!this.satPoints) {
-            this.createSatPointsSystem();
-        }
-
-        // Update current satellite count
-        this.currentSatelliteCount = satellites.length;
-
-        // Update positions and colors efficiently
-        this.updateSatPointsData(satellites);
-    }
-
-    private updateParticleSystem(satellites: SatelliteData[]): void {
-        // Remove existing particle system if no satellites
-        if (satellites.length === 0) {
-            if (this.particleSystem) {
-                this.scene.remove(this.particleSystem);
-                this.particleGeometry?.dispose();
-                this.particleMaterial?.dispose();
-                this.particleSystem = null;
-                this.particleGeometry = null;
-                this.particleMaterial = null;
-                this.currentSatelliteCount = 0;
-            }
-            return;
-        }
-
-        // Only create particle system if it doesn't exist
-        if (!this.particleSystem) {
-            this.createParticleSystem();
-        }
-
-        // Update current satellite count
-        this.currentSatelliteCount = satellites.length;
-
-        // Update positions and colors efficiently
-        this.updateParticlePositions(satellites);
-    }
+    // Particle system removed
 
     private updateInstanceData(satellites: SatelliteData[]): void {
         if (!this.instancedMesh || !this.satelliteGeometry) return;
@@ -547,6 +483,7 @@ export class EntityManager {
         // Copy from our direct arrays to the geometry attributes
         const satelliteCount = satellites.length;
 
+        // Direct array copy for maximum performance
         for (let i = 0; i < satelliteCount; i++) {
             const i3 = i * 3;
 
@@ -729,244 +666,13 @@ export class EntityManager {
         this.updateInstanceData(satellites);
     }
 
-    private createParticleSystem(): void {
-        const satellites = this.getAllSatellites();
-        if (satellites.length === 0) return;
+    // Particle system creation removed
 
-        // Remove existing particle system
-        if (this.particleSystem) {
-            this.scene.remove(this.particleSystem);
-            this.particleGeometry?.dispose();
-            this.particleMaterial?.dispose();
-        }
+    // Particle system methods removed
 
-        const maxParticles = this.options.maxSatellites;
-        this.particleGeometry = new THREE.BufferGeometry();
+    // SatPoints system creation removed
 
-        // Initialize with maximum possible particles - all hidden
-        const positions = new Float32Array(maxParticles * 3);
-        const colors = new Float32Array(maxParticles * 3);
-
-        // Initialize all particles to hidden position (do this ONCE)
-        for (let i = 0; i < maxParticles; i++) {
-            const i3 = i * 3;
-            positions[i3] = 10000;
-            positions[i3 + 1] = 10000;
-            positions[i3 + 2] = 10000;
-            colors[i3] = 0;
-            colors[i3 + 1] = 0;
-            colors[i3 + 2] = 0;
-        }
-
-        this.particleGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-        this.particleGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-
-        // Set a large bounding sphere to encompass all possible satellite positions
-        // This prevents frustum culling issues
-        this.particleGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 10);
-
-        this.particleMaterial = new THREE.PointsMaterial({
-            size: 0.01,
-            vertexColors: true,
-        });
-
-        this.particleSystem = new THREE.Points(this.particleGeometry, this.particleMaterial);
-        this.scene.add(this.particleSystem);
-
-        // Reset lastSatelliteCount to ensure proper update
-        this.lastSatelliteCount = 0;
-
-        // Update positions for current satellites
-        this.updateParticlePositions(satellites);
-    }
-
-    private updateParticlePositions(satellites: SatelliteData[]): void {
-        if (!this.particleSystem || !this.particleGeometry) return;
-
-        const positionAttribute = this.particleGeometry.attributes.position as THREE.BufferAttribute;
-        const colorAttribute = this.particleGeometry.attributes.color as THREE.BufferAttribute;
-
-        const positions = positionAttribute.array as Float32Array;
-        const colors = colorAttribute.array as Float32Array;
-
-        // Update positions and colors for active satellites
-        satellites.forEach((_, index) => {
-            const i3 = index * 3;
-
-            // Use direct position from our arrays
-            positions[i3] = this.positions[i3];
-            positions[i3 + 1] = this.positions[i3 + 1];
-            positions[i3 + 2] = this.positions[i3 + 2];
-
-            // Use direct color from our arrays
-            colors[i3] = this.colors[i3];
-            colors[i3 + 1] = this.colors[i3 + 1];
-            colors[i3 + 2] = this.colors[i3 + 2];
-        });
-
-        // Only hide newly unused particles when count decreases
-        if (satellites.length < this.lastSatelliteCount) {
-            for (let i = satellites.length; i < this.lastSatelliteCount; i++) {
-                const i3 = i * 3;
-                positions[i3] = 10000;
-                positions[i3 + 1] = 10000;
-                positions[i3 + 2] = 10000;
-                colors[i3] = 0;
-                colors[i3 + 1] = 0;
-                colors[i3 + 2] = 0;
-            }
-        }
-
-        this.lastSatelliteCount = satellites.length;
-
-        // Only update the range that changed
-        if (satellites.length > 0) {
-            const updateCount = Math.max(satellites.length, this.lastSatelliteCount);
-
-            positionAttribute.updateRanges = [
-                {
-                    start: 0,
-                    count: updateCount,
-                },
-            ];
-            colorAttribute.updateRanges = [
-                {
-                    start: 0,
-                    count: updateCount,
-                },
-            ];
-
-            positionAttribute.needsUpdate = true;
-            colorAttribute.needsUpdate = true;
-        }
-
-        // DO NOT call computeBoundingSphere() here - it's too expensive!
-        // The bounding sphere is already set to encompass all possible positions
-    }
-
-    private createSatPointsSystem(): void {
-        const satellites = this.getAllSatellites();
-        if (satellites.length === 0) return;
-
-        // Remove existing SatPoints
-        if (this.satPoints) {
-            this.scene.remove(this.satPoints);
-        }
-
-        // Create SatPoints with maximum capacity
-        this.satPoints = new SatPoints(this.options.maxSatellites);
-
-        // Initialize ALL satellites to hidden position (do this ONCE)
-        const satArray = this.satPoints.satArray;
-        const satColor = this.satPoints.satColor;
-        const visibilityArray = this.satPoints.visibilityArray;
-        const sizeArray = this.satPoints.sizeArray;
-
-        for (let i = 0; i < this.options.maxSatellites; i++) {
-            const i3 = i * 3;
-            satArray[i3] = 10000;
-            satArray[i3 + 1] = 10000;
-            satArray[i3 + 2] = 10000;
-            satColor[i3] = 0;
-            satColor[i3 + 1] = 0;
-            satColor[i3 + 2] = 0;
-            visibilityArray[i] = 0;
-            sizeArray[i] = 1;
-        }
-
-        if (this.satPoints) {
-            this.scene.add(this.satPoints);
-        }
-
-        // Reset lastSatelliteCount to ensure proper update
-        this.lastSatelliteCount = 0;
-
-        // Update data for current satellites
-        this.updateSatPointsData(satellites);
-    }
-
-    private updateSatPointsData(satellites: SatelliteData[]): void {
-        if (!this.satPoints) return;
-
-        // DIRECT buffer manipulation - no method calls!
-        const satArray = this.satPoints.satArray;
-        const satColor = this.satPoints.satColor;
-        const visibilityArray = this.satPoints.visibilityArray;
-        const sizeArray = this.satPoints.sizeArray;
-
-        // Update active satellites - NO FRUSTUM CULLING
-        for (let j = 0; j < satellites.length; j++) {
-            // Direct array access using our pre-computed arrays
-            const j3 = j * 3;
-            satArray[j3] = this.positions[j3];
-            satArray[j3 + 1] = this.positions[j3 + 1];
-            satArray[j3 + 2] = this.positions[j3 + 2];
-
-            // Direct color access from our arrays
-            satColor[j3] = this.colors[j3];
-            satColor[j3 + 1] = this.colors[j3 + 1];
-            satColor[j3 + 2] = this.colors[j3 + 2];
-
-            // Direct visibility from our arrays
-            visibilityArray[j] = this.visibility[j];
-
-            // Direct size from our arrays
-            sizeArray[j] = this.sizes[j];
-        }
-
-        // Hide unused satellites
-        for (let j = satellites.length; j < this.options.maxSatellites; j++) {
-            const j3 = j * 3;
-            satArray[j3] = 10000;
-            satArray[j3 + 1] = 10000;
-            satArray[j3 + 2] = 10000;
-            satColor[j3] = 0;
-            satColor[j3 + 1] = 0;
-            satColor[j3 + 2] = 0;
-            visibilityArray[j] = 0;
-        }
-
-        // Use update ranges like instanced mesh
-        const updateCount = Math.max(satellites.length, this.lastSatelliteCount);
-
-        if (updateCount > 0) {
-            this.satPoints.satPositionAttribute.updateRanges = [
-                {
-                    start: 0,
-                    count: updateCount,
-                },
-            ];
-            this.satPoints.satColorAttribute.updateRanges = [
-                {
-                    start: 0,
-                    count: updateCount,
-                },
-            ];
-            // Only update visibility if satellites were added/removed
-            if (satellites.length !== this.lastSatelliteCount) {
-                this.satPoints.satVisibilityAttribute.updateRanges = [
-                    {
-                        start: 0,
-                        count: updateCount,
-                    },
-                ];
-            }
-        }
-
-        // Mark attributes for update
-        this.satPoints.satPositionAttribute.needsUpdate = true;
-        this.satPoints.satColorAttribute.needsUpdate = true;
-
-        // Only update visibility when count changes
-        if (satellites.length !== this.lastSatelliteCount) {
-            this.satPoints.satVisibilityAttribute.needsUpdate = true;
-        }
-
-        // Skip size updates if static (remove this line entirely if sizes never change)
-        // this.satPoints.satSizeAttribute.needsUpdate = true;
-
-        this.lastSatelliteCount = satellites.length;
-    }
+    // SatPoints data update removed
     public setTime(time: Date, satelliteUpdateStartTime: number, satelliteUpdateEndTime: number, instancedMeshUpdateStartTime: number, instancedMeshUpdateEndTime: number): void {
         this.currentTime = time;
         this.update(time, satelliteUpdateStartTime, satelliteUpdateEndTime, instancedMeshUpdateStartTime, instancedMeshUpdateEndTime);
@@ -1130,20 +836,8 @@ export class EntityManager {
         return this.instancedMesh;
     }
 
-    public getParticleSystem(): THREE.Points | null {
-        return this.particleSystem;
-    }
-
     public getCurrentSystem(): THREE.Object3D | null {
-        switch (this.options.renderingSystem) {
-            case "satpoints":
-                return this.satPoints;
-            case "instanced":
-                return this.instancedMesh;
-            case "particle":
-            default:
-                return this.particleSystem;
-        }
+        return this.instancedMesh;
     }
 
     public getSystemInfo(): {
@@ -1155,78 +849,19 @@ export class EntityManager {
         return {
             satelliteCount: this.currentSatelliteCount,
             maxSatellites: this.options.maxSatellites,
-            isOptimized:
-                this.options.renderingSystem === "satpoints"
-                    ? this.satPoints !== null
-                    : this.options.renderingSystem === "instanced"
-                        ? this.instancedMesh !== null
-                        : this.particleSystem !== null,
-            systemType: this.options.renderingSystem,
+            isOptimized: this.instancedMesh !== null,
+            systemType: "instanced",
         };
     }
 
-    public setRenderingSystem(system: RenderingSystem): void {
-        if (this.options.renderingSystem !== system) {
-            const oldSystem = this.options.renderingSystem;
-            this.options.renderingSystem = system;
-
-            // Clean up old system
-            this.cleanupRenderingSystem(oldSystem);
-
-            // Recreate the system
-            this.updateInstancedMesh();
-        }
+    public setRenderingSystem(_system: RenderingSystem): void {
+        // Only instanced rendering supported
+        console.log("Only instanced rendering is supported");
     }
 
-    private cleanupRenderingSystem(system: RenderingSystem): void {
-        switch (system) {
-            case "particle":
-                if (this.particleSystem) {
-                    this.scene.remove(this.particleSystem);
-                    this.particleGeometry?.dispose();
-                    this.particleMaterial?.dispose();
-                    this.particleSystem = null;
-                    this.particleGeometry = null;
-                    this.particleMaterial = null;
-                }
-                break;
-            case "instanced":
-                if (this.instancedMesh) {
-                    this.scene.remove(this.instancedMesh);
-                    this.satelliteGeometry?.dispose();
-                    this.satelliteMaterial?.dispose();
-                    this.instancedMesh = null;
-                    this.satelliteGeometry = null;
-                    this.satelliteMaterial = null;
-                }
-                break;
-            case "satpoints":
-                if (this.satPoints) {
-                    this.scene.remove(this.satPoints);
-                    this.satPoints = null;
-                }
-                break;
-        }
-    }
+    // Rendering system cleanup removed - only instanced supported
 
-    /**
-     * Set the base size for SatPoints circles
-     */
-    public setSatPointsSize(size: number): void {
-        if (this.satPoints) {
-            this.satPoints.setBaseSize(size);
-        }
-    }
-
-    /**
-     * Get the current SatPoints size
-     */
-    public getSatPointsSize(): number {
-        if (this.satPoints) {
-            return this.satPoints.getBaseSize();
-        }
-        return 0.2; // Default size
-    }
+    // SatPoints size methods removed
 
     public setOcclusionCulling(enabled: boolean): void {
         this.options.enableOcclusionCulling = enabled;
@@ -1237,16 +872,10 @@ export class EntityManager {
     }
 
     public getRenderingSystem(): RenderingSystem {
-        return this.options.renderingSystem;
+        return "instanced";
     }
 
-    public setParticleSize(size: number): void {
-        this.options.particleSize = size;
-    }
-
-    public getParticleSize(): number {
-        return this.options.particleSize;
-    }
+    // Particle size methods removed
 
     public setMaxSatellites(max: number): void {
         this.options.maxSatellites = max;
@@ -1313,13 +942,8 @@ export class EntityManager {
         const wasMeshUpdatesEnabled = this.meshUpdatesEnabled;
         this.meshUpdatesEnabled = true;
 
-        if (this.options.renderingSystem === "instanced") {
-            this.updateInstancedMeshSystem(satellites);
-        } else if (this.options.renderingSystem === "satpoints") {
-            this.updateSatPointsSystem(satellites);
-        } else {
-            this.updateParticleSystem(satellites);
-        }
+        // Only instanced rendering supported
+        this.updateInstancedMeshSystem(satellites);
 
         this.update(this.currentTime, 0, 0, 0, 0);
         // Restore the original mesh updates setting
@@ -1340,22 +964,6 @@ export class EntityManager {
             this.instancedMesh = null;
             this.satelliteGeometry = null;
             this.satelliteMaterial = null;
-        }
-
-        // Clean up SatPoints system
-        if (this.satPoints) {
-            this.scene.remove(this.satPoints);
-            this.satPoints = null;
-        }
-
-        // Clean up particle system
-        if (this.particleSystem) {
-            this.scene.remove(this.particleSystem);
-            this.particleGeometry?.dispose();
-            this.particleMaterial?.dispose();
-            this.particleSystem = null;
-            this.particleGeometry = null;
-            this.particleMaterial = null;
         }
     }
 }

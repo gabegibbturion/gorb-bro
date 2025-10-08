@@ -28,7 +28,7 @@ export interface GlobeEngineOptions {
     autoRotate?: boolean;
     rotationSpeed?: number;
     maxSatellites?: number;
-    renderingSystem?: RenderingSystem; // Single parameter to control rendering system
+    // renderingSystem?: RenderingSystem; // Only instanced rendering supported
     globeType?: GlobeType; // Use enum for globe type selection
     orbitRenderingSystem?: OrbitRenderingSystem; // Orbit rendering system
     maxOrbits?: number; // Maximum number of orbits to render
@@ -102,7 +102,7 @@ export class GlobeEngine {
             autoRotate: false,
             rotationSpeed: 0.001,
             maxSatellites: 50,
-            renderingSystem: "instanced", // Default to instanced mesh
+            // renderingSystem: "instanced", // Only instanced mesh supported
             globeType: GlobeType.BASIC, // Default to basic globe
             orbitRenderingSystem: "line", // Default to line-based orbits
             maxOrbits: 1000000, // Default max orbits
@@ -159,16 +159,9 @@ export class GlobeEngine {
             powerPreference: "high-performance",
         });
         this.renderer.setSize(this.options.width, this.options.height);
-        // this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.setPixelRatio(1);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-        // Disable shader errors and warnings for better performance
-        // this.renderer.debug = {
-        //   checkShaderErrors: false,
-        //   onShaderError: () => { },
-        // };
 
         this.container.appendChild(this.renderer.domElement);
     }
@@ -243,7 +236,7 @@ export class GlobeEngine {
             this.globe = new THREE.Mesh(geometry, material);
             this.globe.receiveShadow = true;
             this.globe.castShadow = true;
-            this.scene.add(this.globe);
+            // this.scene.add(this.globe);
         }
     }
 
@@ -360,7 +353,7 @@ export class GlobeEngine {
             maxSatellites: this.options.maxSatellites,
             autoCleanup: true,
             updateInterval: 16, // Update every frame (60fps)
-            renderingSystem: this.options.renderingSystem,
+            // renderingSystem: this.options.renderingSystem, // Only instanced supported
         });
 
         // Set up entity manager callbacks
@@ -764,21 +757,16 @@ export class GlobeEngine {
         return this.entityManager;
     }
 
-    public setRenderingSystem(system: RenderingSystem): void {
-        this.entityManager.setRenderingSystem(system);
+    public setRenderingSystem(_system: RenderingSystem): void {
+        // Only instanced rendering supported
+        console.log("Only instanced rendering is supported");
     }
 
     public getRenderingSystem(): RenderingSystem {
-        return this.entityManager.getRenderingSystem();
+        return "instanced";
     }
 
-    public setSatPointsSize(size: number): void {
-        this.entityManager.setSatPointsSize(size);
-    }
-
-    public getSatPointsSize(): number {
-        return this.entityManager.getSatPointsSize();
-    }
+    // SatPoints size methods removed
 
     public getSystemInfo(): {
         satelliteCount: number;
