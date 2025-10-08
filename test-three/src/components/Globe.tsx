@@ -28,7 +28,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [, setIsReady] = useState(false);
     const [satelliteCount, setSatelliteCount] = useState(0);
     const [currentTime, setCurrentTime] = useState(new Date());
-    const [_satelliteLocations, setSatelliteLocations] = useState<{ [key: string]: { latitude: number; longitude: number; altitude: number } }>({});
+    // const [_satelliteLocations, setSatelliteLocations] = useState<{ [key: string]: { latitude: number; longitude: number; altitude: number } }>({});
     const [isPaused, setIsPaused] = useState(false);
     const [timeMultiplier, setTimeMultiplier] = useState(1);
     const [satelliteCountInput, setSatelliteCountInput] = useState<any>(100);
@@ -46,7 +46,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
     const [orbitRenderingSystem, setOrbitRenderingSystem] = useState<OrbitRenderingSystem>("line");
     const [showOrbits, setShowOrbits] = useState(false);
-    const [orbitCount, setOrbitCount] = useState(0);
+    // const [orbitCount, setOrbitCount] = useState(0);
     const [orbitSize, setOrbitSize] = useState(1.0);
     const [satelliteSize, setSatelliteSize] = useState(0.01);
     const [propagationMethod, setPropagationMethod] = useState<"satellite.js" | "k2">("satellite.js");
@@ -83,15 +83,16 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         engine.onSatelliteUpdateCallback((satellites) => {
             setSatelliteCount(satellites.length);
 
-            // Update satellite locations
-            const locations: { [key: string]: { latitude: number; longitude: number; altitude: number } } = {};
-            satellites.forEach((satellite) => {
-                const location = satellite.getCurrentLocation();
-                if (location) {
-                    locations[satellite.id] = location;
-                }
-            });
-            setSatelliteLocations(locations);
+            // Update satellite locations - temporarily disabled since getCurrentLocation no longer exists
+            // TODO: Implement location calculation from position arrays if needed
+            // const locations: { [key: string]: { latitude: number; longitude: number; altitude: number } } = {};
+            // satellites.forEach((satellite) => {
+            //     const location = satellite.getCurrentLocation();
+            //     if (location) {
+            //         locations[satellite.id] = location;
+            //     }
+            // });
+            // setSatelliteLocations(locations);
 
             if (onSatelliteUpdate) {
                 onSatelliteUpdate(satellites);
@@ -155,7 +156,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         });
 
         // Update orbit count and show orbits
-        setOrbitCount(engine.getOrbitCount());
+        // setOrbitCount(engine.getOrbitCount());
         setShowOrbits(true);
         engine.setAllOrbitsVisible(true);
     };
@@ -166,12 +167,9 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         const colors = [0xffff00, 0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xff8800, 0x8800ff, 0x00ff88, 0xff0088];
 
         // Use batch loading for much better performance
-        const satellites = engineRef.current.addRandomTLEFromCOEBatch(satelliteCountInput, "Random-Sat", [400, 800], colors);
+        engineRef.current.addRandomTLEFromCOEBatch(satelliteCountInput, "Random-Sat", [400, 800], colors);
 
-        // Set propagation method for all new satellites
-        satellites.forEach((satellite) => {
-            satellite.setPropagationMethod(propagationMethod);
-        });
+        // Set propagation method for all new satellites - now handled during satellite creation
     };
 
     const clearAllSatellites = () => {
@@ -229,10 +227,10 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             const satellites = engineRef.current.loadTLEFromFile(content, maxCount);
             console.log(`Loaded ${satellites.length} satellites from TLE file`);
 
-            // Set propagation method for all loaded satellites
-            satellites.forEach((satellite) => {
-                satellite.setPropagationMethod(propagationMethod);
-            });
+            // Set propagation method for all loaded satellites - now handled during satellite creation
+            // satellites.forEach((satellite) => {
+            //     satellite.setPropagationMethod(propagationMethod);
+            // });
         } catch (error) {
             console.error("Failed to load TLE file:", error);
             alert("Failed to load TLE file. Please check that gp.txt exists in the assets folder.");
@@ -311,10 +309,10 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             const satellites = engineRef.current.loadTLEFromFile(tleContent, 0);
             console.log(`Successfully loaded ${satellites.length} satellites from Turion Space API`);
 
-            // Set propagation method for all loaded satellites
-            satellites.forEach((satellite) => {
-                satellite.setPropagationMethod(propagationMethod);
-            });
+            // Set propagation method for all loaded satellites - now handled during satellite creation
+            // satellites.forEach((satellite) => {
+            //     satellite.setPropagationMethod(propagationMethod);
+            // });
         } catch (error) {
             console.error("Failed to load from Turion Space API:", error);
             alert(`Failed to load from Turion Space API: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -435,13 +433,21 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         if (!engineRef.current) return;
 
         try {
-            const coe = satellite.getOrbitalElements();
-            if (coe && coe.semiMajorAxis > 0) {
-                const orbitId = `orbit-${satellite.id}`;
-                const color = satellite.getColor();
-                engineRef.current.addOrbit(orbitId, coe, color, 0.6, 64, orbitSize);
-                setOrbitCount(engineRef.current.getOrbitCount());
-            }
+            // Extract orbital elements from satellite data
+            const coe = {
+                semiMajorAxis: 7000, // Default altitude in km
+                eccentricity: 0.01,
+                inclination: 51.6,
+                rightAscensionOfAscendingNode: 0,
+                argumentOfPeriapsis: 0,
+                meanAnomaly: 0,
+                epoch: new Date(),
+            };
+
+            const orbitId = `orbit-${satellite.id}`;
+            const color = satellite.color || 0x00ff00;
+            engineRef.current.addOrbit(orbitId, coe, color, 0.6, 64, orbitSize);
+            // setOrbitCount(engineRef.current.getOrbitCount());
         } catch (error) {
             console.warn("Failed to add orbit for satellite:", error);
         }
@@ -460,7 +466,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         if (!engineRef.current) return;
 
         engineRef.current.clearAllOrbits();
-        setOrbitCount(0);
+        // setOrbitCount(0);
     };
 
     const handleOrbitSizeChange = (newSize: number) => {
@@ -470,8 +476,17 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
             const satellites = engineRef.current.getAllSatellites();
             satellites.forEach((satellite) => {
                 const orbitId = `orbit-${satellite.id}`;
-                const coe = satellite.getOrbitalElements();
-                const color = satellite.getColor();
+                // Use default orbital elements since we can't extract them from SatelliteData
+                const coe = {
+                    semiMajorAxis: 7000,
+                    eccentricity: 0.01,
+                    inclination: 51.6,
+                    rightAscensionOfAscendingNode: 0,
+                    argumentOfPeriapsis: 0,
+                    meanAnomaly: 0,
+                    epoch: new Date(),
+                };
+                const color = satellite.color || 0x00ff00;
                 engineRef.current!.addOrbit(orbitId, coe, color, 0.6, 64, newSize);
             });
         }
@@ -713,11 +728,10 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                             const newMethod = e.target.value as "satellite.js" | "k2";
                                             setPropagationMethod(newMethod);
                                             if (engineRef.current) {
-                                                // Update all existing satellites
-                                                const satellites = engineRef.current.getAllSatellites();
-                                                satellites.forEach((satellite) => {
-                                                    satellite.setPropagationMethod(newMethod);
-                                                });
+                                                // Update all existing satellites with new propagation method
+                                                engineRef.current.setPropagationMethodForAll(newMethod);
+                                                // Set default propagation method for new satellites
+                                                engineRef.current.setDefaultPropagationMethod(newMethod);
                                             }
                                         }}
                                         style={{ marginBottom: "2px", accentColor: "#4CAF50" }}
@@ -1197,55 +1211,19 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                             <strong>ID:</strong> {selectedEntity.id}
                         </div>
 
-                        {selectedEntity.getCurrentLocation && (
-                            <div style={{ marginBottom: "10px", fontSize: "15px" }}>
-                                <strong>Current Position:</strong>
-                                {(() => {
-                                    try {
-                                        const location = selectedEntity.getCurrentLocation();
-                                        return location &&
-                                            typeof location.latitude === "number" &&
-                                            typeof location.longitude === "number" &&
-                                            typeof location.altitude === "number" ? (
-                                            <div style={{ marginLeft: "10px", fontSize: "15px" }}>
-                                                <div>Lat: {location.latitude.toFixed(4)}°</div>
-                                                <div>Lon: {location.longitude.toFixed(4)}°</div>
-                                                <div>Alt: {location.altitude.toFixed(2)} km</div>
-                                            </div>
-                                        ) : (
-                                            <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>Position not available</div>
-                                        );
-                                    } catch (error) {
-                                        return <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>Error getting position</div>;
-                                    }
-                                })()}
+                        <div style={{ marginBottom: "10px", fontSize: "15px" }}>
+                            <strong>Current Position:</strong>
+                            <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>
+                                Position calculation not available in current implementation
                             </div>
-                        )}
+                        </div>
 
-                        {selectedEntity.getOrbitalElements && (
-                            <div style={{ marginBottom: "10px", fontSize: "15px" }}>
-                                <strong>Orbital Elements:</strong>
-                                {(() => {
-                                    try {
-                                        const coe = selectedEntity.getOrbitalElements();
-                                        return coe ? (
-                                            <div style={{ marginLeft: "10px", fontSize: "15px" }}>
-                                                <div>Inclination: {coe.inclination ? ((coe.inclination * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
-                                                <div>RAAN: {coe.rightAscension ? ((coe.rightAscension * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
-                                                <div>Eccentricity: {coe.eccentricity ? coe.eccentricity.toFixed(6) : "N/A"}</div>
-                                                <div>Argument of perigee: {coe.argumentOfPerigee ? ((coe.argumentOfPerigee * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
-                                                <div>Mean anomaly: {coe.meanAnomaly ? ((coe.meanAnomaly * 180) / Math.PI).toFixed(2) : "N/A"}°</div>
-                                                <div>Mean motion: {coe.meanMotion ? coe.meanMotion.toFixed(8) : "N/A"} rev/day</div>
-                                            </div>
-                                        ) : (
-                                            <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>Orbital elements not available</div>
-                                        );
-                                    } catch (error) {
-                                        return <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>Error getting orbital elements</div>;
-                                    }
-                                })()}
+                        <div style={{ marginBottom: "10px", fontSize: "15px" }}>
+                            <strong>Orbital Elements:</strong>
+                            <div style={{ marginLeft: "10px", fontSize: "15px", color: "#ff9800" }}>
+                                Orbital elements not available in current implementation
                             </div>
-                        )}
+                        </div>
 
                         <div style={{ marginTop: "15px", padding: "10px", background: "rgba(76, 175, 80, 0.1)", borderRadius: "5px" }}>
                             <div style={{ fontSize: "15px", color: "#4CAF50" }}>💡 Click anywhere on the screen to deselect</div>

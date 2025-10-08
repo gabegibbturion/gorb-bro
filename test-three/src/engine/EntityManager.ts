@@ -1,8 +1,7 @@
+import * as satellite from "satellite.js";
 import * as THREE from "three";
 import type { OrbitalElements } from "./OrbitalElements";
 import { OrbitalElementsGenerator } from "./OrbitalElements";
-import type { SatelliteEntityOptions } from "./SatelliteEntity";
-import { SatelliteEntity } from "./SatelliteEntity";
 import { SatPoints } from "./SatPoints";
 
 export type RenderingSystem = "particle" | "instanced" | "satpoints";
@@ -16,13 +15,40 @@ export interface EntityManagerOptions {
     particleSize?: number; // Size of particles
 }
 
+// Direct satellite data structure for performance
+export interface SatelliteData {
+    id: string;
+    name: string;
+    satrec: any; // satellite.js satrec object
+    color: number;
+    size: number;
+    showTrail: boolean;
+    trailLength: number;
+    trailColor: number;
+    showOrbit: boolean;
+    orbitColor: number;
+    propagationMethod: "satellite.js" | "k2";
+    // K2 state for direct propagation
+    k2State: number[]; // [x, y, z, vx, vy, vz] in km
+    lastUpdateTime: Date | null;
+    isVisible: boolean;
+    isSelected: boolean;
+}
+
 export class EntityManager {
-    private satellites: Map<string, SatelliteEntity> = new Map();
+    private satellites: Map<string, SatelliteData> = new Map();
     private scene: THREE.Scene;
     private options: Required<EntityManagerOptions>;
     private currentTime: Date = new Date();
     private isUpdating: boolean = false;
     private meshUpdatesEnabled: boolean = true; // Control mesh updates
+    private defaultPropagationMethod: "satellite.js" | "k2" = "satellite.js"; // Default propagation method for new satellites
+
+    // Direct position and color arrays for maximum performance
+    private positions: Float32Array;
+    private colors: Float32Array;
+    private visibility: Float32Array;
+    private sizes: Float32Array;
 
     // Instanced buffer geometry for all satellites
     private instancedMesh: THREE.InstancedMesh | null = null;
@@ -39,12 +65,13 @@ export class EntityManager {
     private satPoints: SatPoints | null = null;
 
     // Event callbacks
-    private onSatelliteAdded?: (satellite: SatelliteEntity) => void;
-    private onSatelliteRemoved?: (satellite: SatelliteEntity) => void;
-    private onUpdate?: (satellites: SatelliteEntity[]) => void;
+    private onSatelliteAdded?: (satellite: SatelliteData) => void;
+    private onSatelliteRemoved?: (satellite: SatelliteData) => void;
+    private onUpdate?: (satellites: SatelliteData[]) => void;
 
     private lastSatelliteCount: number = 0;
     private tempColor: THREE.Color = new THREE.Color(); // Reuse color object
+    private tempPosition: THREE.Vector3 = new THREE.Vector3(); // Reuse position object
 
     constructor(scene: THREE.Scene, options: EntityManagerOptions = {}) {
         this.scene = scene;
@@ -57,9 +84,36 @@ export class EntityManager {
             particleSize: 0.01, // Default particle size
             ...options,
         };
+
+        // Initialize direct arrays for maximum performance
+        this.positions = new Float32Array(this.options.maxSatellites * 3);
+        this.colors = new Float32Array(this.options.maxSatellites * 3);
+        this.visibility = new Float32Array(this.options.maxSatellites);
+        this.sizes = new Float32Array(this.options.maxSatellites);
+
+        // Initialize all arrays to hidden state
+        this.initializeArrays();
     }
 
-    public addSatellite(orbitalElements: OrbitalElements, options?: Partial<SatelliteEntityOptions>): SatelliteEntity | null {
+    private initializeArrays(): void {
+        for (let i = 0; i < this.options.maxSatellites; i++) {
+            const i3 = i * 3;
+            // Hidden position (far away)
+            this.positions[i3] = 10000;
+            this.positions[i3 + 1] = 10000;
+            this.positions[i3 + 2] = 10000;
+            // Black color (invisible)
+            this.colors[i3] = 0;
+            this.colors[i3 + 1] = 0;
+            this.colors[i3 + 2] = 0;
+            // Hidden
+            this.visibility[i] = 0;
+            // Default size
+            this.sizes[i] = 1;
+        }
+    }
+
+    public addSatellite(orbitalElements: OrbitalElements, options?: Partial<SatelliteData>): SatelliteData | null {
         if (this.satellites.size >= this.options.maxSatellites) {
             return null;
         }
@@ -70,34 +124,36 @@ export class EntityManager {
         // Extract name from orbital elements
         const name = "name" in orbitalElements ? orbitalElements.name : `Satellite-${Math.floor(Math.random() * 1000)}`;
 
-        const satelliteOptions: SatelliteEntityOptions = {
+        const satelliteData: SatelliteData = {
+            id: Math.random().toString(36).substr(2, 9),
             name,
             satrec,
+            color: 0xffff00,
+            size: 0.01,
+            showTrail: false,
+            trailLength: 100,
+            trailColor: 0xffff00,
+            showOrbit: false,
+            orbitColor: 0x00ff00,
+            propagationMethod: this.defaultPropagationMethod,
+            k2State: [0, 0, 0, 0, 0, 0],
+            lastUpdateTime: null,
+            isVisible: true,
+            isSelected: false,
             ...options,
         };
 
-        const satellite = new SatelliteEntity(satelliteOptions);
-        this.satellites.set(satellite.id, satellite);
-
-        // Add trails and orbits to scene (but not individual meshes)
-        // const trail = satellite.getTrail();
-        // if (trail) {
-        //     this.scene.add(trail);
-        // }
-        // const orbit = satellite.getOrbitVisualization();
-        // if (orbit) {
-        //     this.scene.add(orbit);
-        // }
+        this.satellites.set(satelliteData.id, satelliteData);
 
         // Update instanced mesh
         this.updateInstancedMesh();
 
         // Trigger callback
         if (this.onSatelliteAdded) {
-            this.onSatelliteAdded(satellite);
+            this.onSatelliteAdded(satelliteData);
         }
 
-        return satellite;
+        return satelliteData;
     }
 
     /**
@@ -107,10 +163,10 @@ export class EntityManager {
     public addSatellitesBatch(
         satellitesData: Array<{
             orbitalElements: OrbitalElements;
-            options?: Partial<SatelliteEntityOptions>;
+            options?: Partial<SatelliteData>;
         }>
-    ): SatelliteEntity[] {
-        const addedSatellites: SatelliteEntity[] = [];
+    ): SatelliteData[] {
+        const addedSatellites: SatelliteData[] = [];
 
         console.log(`Starting batch add of ${satellitesData.length} satellites...`);
         const startTime = performance.now();
@@ -129,19 +185,31 @@ export class EntityManager {
                 // Extract name from orbital elements
                 const name = "name" in data.orbitalElements ? data.orbitalElements.name : `Satellite-${Math.floor(Math.random() * 1000)}`;
 
-                const satelliteOptions: SatelliteEntityOptions = {
+                const satelliteData: SatelliteData = {
+                    id: Math.random().toString(36).substr(2, 9),
                     name,
                     satrec,
+                    color: 0xffff00,
+                    size: 0.01,
+                    showTrail: false,
+                    trailLength: 100,
+                    trailColor: 0xffff00,
+                    showOrbit: false,
+                    orbitColor: 0x00ff00,
+                    propagationMethod: this.defaultPropagationMethod,
+                    k2State: [0, 0, 0, 0, 0, 0],
+                    lastUpdateTime: null,
+                    isVisible: true,
+                    isSelected: false,
                     ...data.options,
                 };
 
-                const satellite = new SatelliteEntity(satelliteOptions);
-                this.satellites.set(satellite.id, satellite);
-                addedSatellites.push(satellite);
+                this.satellites.set(satelliteData.id, satelliteData);
+                addedSatellites.push(satelliteData);
 
                 // Trigger callback
                 if (this.onSatelliteAdded) {
-                    this.onSatelliteAdded(satellite);
+                    this.onSatelliteAdded(satelliteData);
                 }
             } catch (error) {
                 console.warn(`Failed to add satellite:`, error);
@@ -163,18 +231,6 @@ export class EntityManager {
             return false;
         }
 
-        // Remove trails and orbits from scene
-        const trail = satellite.getTrail();
-        if (trail) {
-            this.scene.remove(trail);
-        }
-        const orbit = satellite.getOrbitVisualization();
-        if (orbit) {
-            this.scene.remove(orbit);
-        }
-
-        // Cleanup
-        satellite.dispose();
         this.satellites.delete(id);
 
         // Update instanced mesh
@@ -188,11 +244,11 @@ export class EntityManager {
         return true;
     }
 
-    public getSatellite(id: string): SatelliteEntity | undefined {
+    public getSatellite(id: string): SatelliteData | undefined {
         return this.satellites.get(id);
     }
 
-    public getAllSatellites(): SatelliteEntity[] {
+    public getAllSatellites(): SatelliteData[] {
         return Array.from(this.satellites.values());
     }
 
@@ -203,6 +259,116 @@ export class EntityManager {
     public clearAll(): void {
         const satelliteIds = Array.from(this.satellites.keys());
         satelliteIds.forEach((id) => this.removeSatellite(id));
+    }
+
+    // Direct propagation methods for maximum performance
+    private propagateSatelliteJs(satelliteData: SatelliteData, time: Date): THREE.Vector3 | null {
+        try {
+            const positionAndVelocity = satellite.propagate(satelliteData.satrec, time);
+
+            if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
+                const pos = positionAndVelocity.position;
+
+                // Check for NaN values
+                if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
+                    return null;
+                }
+
+                // Convert from km to Three.js units (globe radius = 1)
+                const earthRadiusKm = 6371;
+                const scaleFactor = 1 / earthRadiusKm;
+
+                this.tempPosition.set(
+                    pos.x * scaleFactor,
+                    pos.y * scaleFactor,
+                    pos.z * scaleFactor
+                );
+
+                return this.tempPosition;
+            }
+        } catch (error) {
+            // Propagation error
+        }
+        return null;
+    }
+
+    private propagateK2(satelliteData: SatelliteData, time: Date): THREE.Vector3 | null {
+        // Initialize K2 state if needed
+        if (satelliteData.k2State[0] === 0 && satelliteData.k2State[1] === 0 && satelliteData.k2State[2] === 0) {
+            this.initializeK2State(satelliteData);
+        }
+
+        // Calculate time step in seconds
+        const timeStep = (time.getTime() - (satelliteData.lastUpdateTime?.getTime() || time.getTime())) / 1000;
+
+        if (Math.abs(timeStep) < 0.001) return null; // Skip very small time steps
+
+        // Apply K2 propagation
+        this.applyK2Propagation(satelliteData, timeStep);
+
+        // Convert to Three.js units
+        const earthRadiusKm = 6371;
+        const scaleFactor = 1 / earthRadiusKm;
+
+        this.tempPosition.set(
+            satelliteData.k2State[0] * scaleFactor,
+            satelliteData.k2State[1] * scaleFactor,
+            satelliteData.k2State[2] * scaleFactor
+        );
+
+        return this.tempPosition;
+    }
+
+    private initializeK2State(satelliteData: SatelliteData): void {
+        try {
+            const now = new Date();
+            const positionAndVelocity = satellite.propagate(satelliteData.satrec, now);
+
+            if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
+                const pos = positionAndVelocity.position;
+                const vel = positionAndVelocity.velocity;
+
+                // Store in km units for K2 propagation
+                satelliteData.k2State[0] = pos.x;
+                satelliteData.k2State[1] = pos.y;
+                satelliteData.k2State[2] = pos.z;
+                satelliteData.k2State[3] = vel.x;
+                satelliteData.k2State[4] = vel.y;
+                satelliteData.k2State[5] = vel.z;
+            }
+        } catch (error) {
+            // Fallback to default state
+            satelliteData.k2State = [7000, 0, 0, 0, 7.5, 0]; // Default LEO orbit
+        }
+    }
+
+    private applyK2Propagation(satelliteData: SatelliteData, dt: number): void {
+        const MU_EARTH = 3.986004418e5; // Earth's gravitational parameter in km³/s²
+        const halfDT = dt * 0.5;
+
+        // K1 calculation
+        const k1 = [satelliteData.k2State[0], satelliteData.k2State[1], satelliteData.k2State[2]];
+        const mag1 = -MU_EARTH / Math.pow(k1[0] * k1[0] + k1[1] * k1[1] + k1[2] * k1[2], 1.5);
+        k1[0] *= mag1;
+        k1[1] *= mag1;
+        k1[2] *= mag1;
+
+        // K2 calculation
+        const k2 = [satelliteData.k2State[0] + dt * k1[0], satelliteData.k2State[1] + dt * k1[1], satelliteData.k2State[2] + dt * k1[2]];
+        const mag2 = -MU_EARTH / Math.pow(k2[0] * k2[0] + k2[1] * k2[1] + k2[2] * k2[2], 1.5);
+        k2[0] *= mag2;
+        k2[1] *= mag2;
+        k2[2] *= mag2;
+
+        // Update velocities
+        satelliteData.k2State[3] += halfDT * (k1[0] + k2[0]);
+        satelliteData.k2State[4] += halfDT * (k1[1] + k2[1]);
+        satelliteData.k2State[5] += halfDT * (k1[2] + k2[2]);
+
+        // Update positions
+        satelliteData.k2State[0] += dt * satelliteData.k2State[3];
+        satelliteData.k2State[1] += dt * satelliteData.k2State[4];
+        satelliteData.k2State[2] += dt * satelliteData.k2State[5];
     }
 
     public update(
@@ -217,10 +383,8 @@ export class EntityManager {
         this.isUpdating = true;
         this.currentTime = time;
 
-        // Update all satellites
-        this.satellites.forEach((satellite) => {
-            satellite.update(time);
-        });
+        // Direct propagation and array updates for maximum performance
+        this.updateSatellitePositions(time);
 
         // Update instanced mesh positions and colors
         this.updateInstancedMesh();
@@ -231,6 +395,51 @@ export class EntityManager {
         }
 
         this.isUpdating = false;
+    }
+
+    private updateSatellitePositions(time: Date): void {
+        const satellites = this.getAllSatellites();
+
+        satellites.forEach((satelliteData, index) => {
+            // Skip update if time hasn't changed significantly
+            if (satelliteData.lastUpdateTime && Math.abs(time.getTime() - satelliteData.lastUpdateTime.getTime()) < 50) {
+                return;
+            }
+
+            let position: THREE.Vector3 | null = null;
+
+            // Direct propagation based on method
+            if (satelliteData.propagationMethod === "k2") {
+                position = this.propagateK2(satelliteData, time);
+            } else {
+                position = this.propagateSatelliteJs(satelliteData, time);
+            }
+
+            if (position) {
+                // Direct array manipulation for maximum performance
+                const i3 = index * 3;
+
+                // Update position
+                this.positions[i3] = position.x;
+                this.positions[i3 + 1] = position.y;
+                this.positions[i3 + 2] = position.z;
+
+                // Update color
+                this.tempColor.setHex(satelliteData.color);
+                this.colors[i3] = this.tempColor.r;
+                this.colors[i3 + 1] = this.tempColor.g;
+                this.colors[i3 + 2] = this.tempColor.b;
+
+                // Update visibility
+                this.visibility[index] = satelliteData.isVisible ? 1 : 0;
+
+                // Update size
+                this.sizes[index] = satelliteData.size;
+
+                // Update last update time
+                satelliteData.lastUpdateTime = time;
+            }
+        });
     }
 
     private updateInstancedMesh(): void {
@@ -250,7 +459,7 @@ export class EntityManager {
         }
     }
 
-    private updateInstancedMeshSystem(satellites: SatelliteEntity[]): void {
+    private updateInstancedMeshSystem(satellites: SatelliteData[]): void {
         // Remove existing instanced mesh if no satellites
         if (satellites.length === 0) {
             if (this.instancedMesh) {
@@ -277,7 +486,7 @@ export class EntityManager {
         this.updateInstanceData(satellites);
     }
 
-    private updateSatPointsSystem(satellites: SatelliteEntity[]): void {
+    private updateSatPointsSystem(satellites: SatelliteData[]): void {
         // Remove existing SatPoints if no satellites
         if (satellites.length === 0) {
             if (this.satPoints) {
@@ -300,7 +509,7 @@ export class EntityManager {
         this.updateSatPointsData(satellites);
     }
 
-    private updateParticleSystem(satellites: SatelliteEntity[]): void {
+    private updateParticleSystem(satellites: SatelliteData[]): void {
         // Remove existing particle system if no satellites
         if (satellites.length === 0) {
             if (this.particleSystem) {
@@ -327,7 +536,7 @@ export class EntityManager {
         this.updateParticlePositions(satellites);
     }
 
-    private updateInstanceData(satellites: SatelliteEntity[]): void {
+    private updateInstanceData(satellites: SatelliteData[]): void {
         if (!this.instancedMesh || !this.satelliteGeometry) return;
 
         const translateAttribute = this.satelliteGeometry.attributes.translate as THREE.InstancedBufferAttribute;
@@ -335,49 +544,39 @@ export class EntityManager {
         const translateArray = translateAttribute.array as Float32Array;
         const colorArray = colorAttribute.array as Float32Array;
 
-        // Only update positions and colors for active satellites
-        satellites.forEach((satellite, index) => {
-            const position = satellite.getPositionDirect();
-            const i3 = index * 3;
+        // Copy from our direct arrays to the geometry attributes
+        const satelliteCount = satellites.length;
 
-            const distanceFromOrigin = position.length();
-            const globeRadius = 1.0;
+        for (let i = 0; i < satelliteCount; i++) {
+            const i3 = i * 3;
 
-            if (this.options.enableOcclusionCulling && distanceFromOrigin < globeRadius) {
-                translateArray[i3 + 0] = 10000;
-                translateArray[i3 + 1] = 10000;
-                translateArray[i3 + 2] = 10000;
-                colorArray[i3 + 0] = 0;
-                colorArray[i3 + 1] = 0;
-                colorArray[i3 + 2] = 0;
-            } else {
-                translateArray[i3 + 0] = position.x;
-                translateArray[i3 + 1] = position.y;
-                translateArray[i3 + 2] = position.z;
+            // Copy position from our direct array
+            translateArray[i3] = this.positions[i3];
+            translateArray[i3 + 1] = this.positions[i3 + 1];
+            translateArray[i3 + 2] = this.positions[i3 + 2];
 
-                this.tempColor.setHex(satellite.getColor());
-                colorArray[i3 + 0] = this.tempColor.r;
-                colorArray[i3 + 1] = this.tempColor.g;
-                colorArray[i3 + 2] = this.tempColor.b;
-            }
-        });
+            // Copy color from our direct array
+            colorArray[i3] = this.colors[i3];
+            colorArray[i3 + 1] = this.colors[i3 + 1];
+            colorArray[i3 + 2] = this.colors[i3 + 2];
+        }
 
-        // Only hide newly unused instances when count decreases
-        if (satellites.length < this.lastSatelliteCount) {
-            for (let i = satellites.length; i < this.lastSatelliteCount; i++) {
+        // Hide unused instances when count decreases
+        if (satelliteCount < this.lastSatelliteCount) {
+            for (let i = satelliteCount; i < this.lastSatelliteCount; i++) {
                 const i3 = i * 3;
-                translateArray[i3 + 0] = 10000;
+                translateArray[i3] = 10000;
                 translateArray[i3 + 1] = 10000;
                 translateArray[i3 + 2] = 10000;
-                colorArray[i3 + 0] = 0;
+                colorArray[i3] = 0;
                 colorArray[i3 + 1] = 0;
                 colorArray[i3 + 2] = 0;
             }
         }
 
         // Only update the range that changed
-        if (satellites.length > 0 || this.lastSatelliteCount > 0) {
-            const updateCount = Math.max(satellites.length, this.lastSatelliteCount);
+        if (satelliteCount > 0 || this.lastSatelliteCount > 0) {
+            const updateCount = Math.max(satelliteCount, this.lastSatelliteCount);
 
             translateAttribute.updateRanges = [
                 {
@@ -393,7 +592,7 @@ export class EntityManager {
             ];
         }
 
-        this.lastSatelliteCount = satellites.length;
+        this.lastSatelliteCount = satelliteCount;
 
         translateAttribute.needsUpdate = true;
         colorAttribute.needsUpdate = true;
@@ -581,7 +780,7 @@ export class EntityManager {
         this.updateParticlePositions(satellites);
     }
 
-    private updateParticlePositions(satellites: SatelliteEntity[]): void {
+    private updateParticlePositions(satellites: SatelliteData[]): void {
         if (!this.particleSystem || !this.particleGeometry) return;
 
         const positionAttribute = this.particleGeometry.attributes.position as THREE.BufferAttribute;
@@ -591,18 +790,18 @@ export class EntityManager {
         const colors = colorAttribute.array as Float32Array;
 
         // Update positions and colors for active satellites
-        satellites.forEach((satellite, index) => {
-            const position = satellite.getPositionDirect();
+        satellites.forEach((_, index) => {
             const i3 = index * 3;
 
-            positions[i3] = position.x;
-            positions[i3 + 1] = position.y;
-            positions[i3 + 2] = position.z;
+            // Use direct position from our arrays
+            positions[i3] = this.positions[i3];
+            positions[i3 + 1] = this.positions[i3 + 1];
+            positions[i3 + 2] = this.positions[i3 + 2];
 
-            this.tempColor.setHex(satellite.getColor());
-            colors[i3] = this.tempColor.r;
-            colors[i3 + 1] = this.tempColor.g;
-            colors[i3 + 2] = this.tempColor.b;
+            // Use direct color from our arrays
+            colors[i3] = this.colors[i3];
+            colors[i3 + 1] = this.colors[i3 + 1];
+            colors[i3 + 2] = this.colors[i3 + 2];
         });
 
         // Only hide newly unused particles when count decreases
@@ -686,7 +885,7 @@ export class EntityManager {
         this.updateSatPointsData(satellites);
     }
 
-    private updateSatPointsData(satellites: SatelliteEntity[]): void {
+    private updateSatPointsData(satellites: SatelliteData[]): void {
         if (!this.satPoints) return;
 
         // DIRECT buffer manipulation - no method calls!
@@ -697,28 +896,22 @@ export class EntityManager {
 
         // Update active satellites - NO FRUSTUM CULLING
         for (let j = 0; j < satellites.length; j++) {
-            const satellite = satellites[j];
-            const position = satellite.getPositionDirect();
-
-            // Direct array access
+            // Direct array access using our pre-computed arrays
             const j3 = j * 3;
-            satArray[j3] = position.x;
-            satArray[j3 + 1] = position.y;
-            satArray[j3 + 2] = position.z;
+            satArray[j3] = this.positions[j3];
+            satArray[j3 + 1] = this.positions[j3 + 1];
+            satArray[j3 + 2] = this.positions[j3 + 2];
 
-            // Direct color access - cache the color conversion
-            const color = satellite.getColor();
-            this.tempColor.setHex(color);
+            // Direct color access from our arrays
+            satColor[j3] = this.colors[j3];
+            satColor[j3 + 1] = this.colors[j3 + 1];
+            satColor[j3 + 2] = this.colors[j3 + 2];
 
-            satColor[j3] = this.tempColor.r;
-            satColor[j3 + 1] = this.tempColor.g;
-            satColor[j3 + 2] = this.tempColor.b;
+            // Direct visibility from our arrays
+            visibilityArray[j] = this.visibility[j];
 
-            // Direct visibility - always visible
-            visibilityArray[j] = 1;
-
-            // Direct size - static, could skip updating this
-            sizeArray[j] = 1;
+            // Direct size from our arrays
+            sizeArray[j] = this.sizes[j];
         }
 
         // Hide unused satellites
@@ -784,36 +977,38 @@ export class EntityManager {
     }
 
     // Event handlers
-    public onSatelliteAddedCallback(callback: (satellite: SatelliteEntity) => void): void {
+    public onSatelliteAddedCallback(callback: (satellite: SatelliteData) => void): void {
         this.onSatelliteAdded = callback;
     }
 
-    public onSatelliteRemovedCallback(callback: (satellite: SatelliteEntity) => void): void {
+    public onSatelliteRemovedCallback(callback: (satellite: SatelliteData) => void): void {
         this.onSatelliteRemoved = callback;
     }
 
-    public onUpdateCallback(callback: (satellites: SatelliteEntity[]) => void): void {
+    public onUpdateCallback(callback: (satellites: SatelliteData[]) => void): void {
         this.onUpdate = callback;
     }
 
     // Utility methods
-    public getSatellitesInRange(position: THREE.Vector3, radius: number): SatelliteEntity[] {
-        return this.getAllSatellites().filter((satellite) => {
-            return satellite.getPosition().distanceTo(position) <= radius;
+    public getSatellitesInRange(position: THREE.Vector3, radius: number): SatelliteData[] {
+        return this.getAllSatellites().filter((_, index) => {
+            const i3 = index * 3;
+            const satPosition = new THREE.Vector3(this.positions[i3], this.positions[i3 + 1], this.positions[i3 + 2]);
+            return satPosition.distanceTo(position) <= radius;
         });
     }
 
-    public getSatellitesByName(name: string): SatelliteEntity[] {
+    public getSatellitesByName(name: string): SatelliteData[] {
         return this.getAllSatellites().filter((satellite) => satellite.name.toLowerCase().includes(name.toLowerCase()));
     }
 
-    public getRandomSatellites(count: number): SatelliteEntity[] {
+    public getRandomSatellites(count: number): SatelliteData[] {
         const allSatellites = this.getAllSatellites();
         const shuffled = allSatellites.sort(() => 0.5 - Math.random());
         return shuffled.slice(0, count);
     }
 
-    public addRandomSatellite(name?: string): SatelliteEntity | null {
+    public addRandomSatellite(name?: string): SatelliteData | null {
         const satelliteName = name || `Random-Sat-${Math.floor(Math.random() * 1000)}`;
         const coe = OrbitalElementsGenerator.generateRandomCOE(satelliteName);
 
@@ -833,7 +1028,7 @@ export class EntityManager {
     }
 
     // Add a random satellite using TLE generation from COE
-    public addRandomTLEFromCOE(name?: string, altitudeRange: [number, number] = [400, 800]): SatelliteEntity | null {
+    public addRandomTLEFromCOE(name?: string, altitudeRange: [number, number] = [400, 800]): SatelliteData | null {
         const satelliteName = name || `Random-TLE-${Math.floor(Math.random() * 1000)}`;
         const tle = OrbitalElementsGenerator.generateRandomTLEFromCOE(satelliteName, altitudeRange);
 
@@ -855,7 +1050,7 @@ export class EntityManager {
     /**
      * Add multiple random satellites in batch (much faster)
      */
-    public addRandomTLEFromCOEBatch(count: number, namePrefix?: string, altitudeRange: [number, number] = [400, 800], colors?: number[]): SatelliteEntity[] {
+    public addRandomTLEFromCOEBatch(count: number, namePrefix?: string, altitudeRange: [number, number] = [400, 800], colors?: number[]): SatelliteData[] {
         console.log(`Generating ${count} random satellites...`);
         const startTime = performance.now();
 
@@ -896,37 +1091,39 @@ export class EntityManager {
     }
 
     // Add a satellite using the exact valid TLE (for testing)
-    public addValidSatellite(options?: Partial<SatelliteEntityOptions>): SatelliteEntity | null {
+    public addValidSatellite(options?: Partial<SatelliteData>): SatelliteData | null {
         const validSatrec = OrbitalElementsGenerator.createValidSatellite();
 
-        const satelliteOptions: SatelliteEntityOptions = {
+        const satelliteData: SatelliteData = {
+            id: Math.random().toString(36).substr(2, 9),
             name: "DROID-001",
             satrec: validSatrec,
+            color: 0xffff00,
+            size: 0.01,
+            showTrail: false,
+            trailLength: 100,
+            trailColor: 0xffff00,
+            showOrbit: false,
+            orbitColor: 0x00ff00,
+            propagationMethod: "satellite.js",
+            k2State: [0, 0, 0, 0, 0, 0],
+            lastUpdateTime: null,
+            isVisible: true,
+            isSelected: false,
             ...options,
         };
 
-        const satellite = new SatelliteEntity(satelliteOptions);
-        this.satellites.set(satellite.id, satellite);
-
-        // Add trails and orbits to scene (but not individual meshes)
-        const trail = satellite.getTrail();
-        if (trail) {
-            this.scene.add(trail);
-        }
-        const orbit = satellite.getOrbitVisualization();
-        if (orbit) {
-            this.scene.add(orbit);
-        }
+        this.satellites.set(satelliteData.id, satelliteData);
 
         // Update instanced mesh
         this.updateInstancedMesh();
 
         // Trigger callback
         if (this.onSatelliteAdded) {
-            this.onSatelliteAdded(satellite);
+            this.onSatelliteAdded(satelliteData);
         }
 
-        return satellite;
+        return satelliteData;
     }
 
     public getInstancedMesh(): THREE.InstancedMesh | null {
@@ -962,8 +1159,8 @@ export class EntityManager {
                 this.options.renderingSystem === "satpoints"
                     ? this.satPoints !== null
                     : this.options.renderingSystem === "instanced"
-                    ? this.instancedMesh !== null
-                    : this.particleSystem !== null,
+                        ? this.instancedMesh !== null
+                        : this.particleSystem !== null,
             systemType: this.options.renderingSystem,
         };
     }
@@ -1058,6 +1255,33 @@ export class EntityManager {
 
     public getMaxSatellites(): number {
         return this.options.maxSatellites;
+    }
+
+    public getPositionsArray(): Float32Array {
+        return this.positions;
+    }
+
+    /**
+     * Set propagation method for all satellites
+     */
+    public setPropagationMethodForAll(method: "satellite.js" | "k2"): void {
+        const satellites = this.getAllSatellites();
+        satellites.forEach((satellite) => {
+            satellite.propagationMethod = method;
+            // Reset K2 state when switching to K2
+            if (method === "k2") {
+                satellite.k2State = [0, 0, 0, 0, 0, 0];
+            }
+        });
+        console.log(`Set propagation method to ${method} for ${satellites.length} satellites`);
+    }
+
+    /**
+     * Set default propagation method for new satellites
+     */
+    public setDefaultPropagationMethod(method: "satellite.js" | "k2"): void {
+        this.defaultPropagationMethod = method;
+        console.log(`Set default propagation method to ${method} for new satellites`);
     }
 
     /**

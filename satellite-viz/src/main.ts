@@ -15,6 +15,25 @@ interface TLEData {
   line2: string;
 }
 
+// TLE validation function
+function validateTLE(tle: TLEData): boolean {
+  if (!tle || !tle.line1 || !tle.line2) {
+    return false;
+  }
+
+  // Check TLE format
+  if (!tle.line1.startsWith('1 ') || !tle.line2.startsWith('2 ')) {
+    return false;
+  }
+
+  // Check line lengths (TLE lines should be 69 characters)
+  if (tle.line1.length !== 69 || tle.line2.length !== 69) {
+    return false;
+  }
+
+  return true;
+}
+
 // TLE parsing functions
 function parseTLEFile(content: string): TLEData[] {
   const lines = content.split("\n").filter((line) => line.trim());
@@ -92,7 +111,7 @@ let satelliteData: Array<{
   state: number[];
   period: number;
 }> = [];
-let satRecs: satellite.SatRec[] = [];
+let satRecs: (satellite.SatRec | null)[] = [];
 
 // Performance optimization variables (reserved for future use)
 // let maxSatellites: number = 10000000; // Maximum satellite capacity
@@ -166,6 +185,31 @@ async function loadSatelliteData() {
   allSatPeriods = mockSatellites.map((sat) => sat.period);
   satNames = mockSatellites.map((sat) => sat.name);
   satN = mockSatellites.length;
+
+  // Create satrecs for satellite.js propagation
+  if (useSatelliteJS) {
+    const satRecsBatch = [];
+    for (let i = 0; i < mockSatellites.length; i++) {
+      try {
+        const sat = mockSatellites[i];
+
+        // Validate TLE before creating satrec
+        if (!sat.tle || !sat.tle.line1 || !sat.tle.line2) {
+          console.warn(`Invalid TLE data for mock satellite ${i}:`, sat.tle);
+          satRecsBatch.push(null);
+          continue;
+        }
+
+        const satrec = satellite.twoline2satrec(sat.tle.line1, sat.tle.line2);
+        satRecsBatch.push(satrec);
+      } catch (error) {
+        console.warn(`Failed to create satrec for mock satellite ${i}:`, error);
+        // Add null to maintain array alignment
+        satRecsBatch.push(null);
+      }
+    }
+    satRecs.push(...satRecsBatch);
+  }
 
   // Create satellite sprite
   const loader = new THREE.TextureLoader();
@@ -304,6 +348,11 @@ function updateSatelliteJSPositionsBatch() {
   if (Math.random() < 0.01) {
     // 1% chance to log
     console.log(`Propagating ${satN} satellites with satellite.js, satRecs.length: ${satRecs.length}`);
+
+    // Count valid vs invalid satrecs
+    const validSatrecs = satRecs.filter(s => s !== null).length;
+    const invalidSatrecs = satRecs.filter(s => s === null).length;
+    console.log(`Valid satrecs: ${validSatrecs}, Invalid satrecs: ${invalidSatrecs}`);
   }
 
   // Batch process all satellites
@@ -311,16 +360,54 @@ function updateSatelliteJSPositionsBatch() {
   async function processSatJSBatchGroup(start: number, end: number) {
     for (let i = start; i < end; i++) {
       const tle = satRecs[i];
-      const positionAndVelocity = satellite.propagate(tle, simulationTime);
 
-      if (positionAndVelocity && positionAndVelocity.position && positionAndVelocity.velocity) {
-        // Update state directly
-        allSatState[i][0] = positionAndVelocity.position.x / 6371;
-        allSatState[i][1] = positionAndVelocity.position.y / 6371;
-        allSatState[i][2] = positionAndVelocity.position.z / 6371;
-        allSatState[i][3] = positionAndVelocity.velocity.x / 6371;
-        allSatState[i][4] = positionAndVelocity.velocity.y / 6371;
-        allSatState[i][5] = positionAndVelocity.velocity.z / 6371;
+      // Skip if satrec is null (failed to create)
+      if (!tle) {
+        console.warn(`Skipping satellite ${i} (${satNames[i]}) - no valid satrec`);
+        continue;
+      }
+
+      try {
+        const positionAndVelocity = satellite.propagate(tle, simulationTime);
+
+        if (positionAndVelocity && positionAndVelocity.position && positionAndVelocity.velocity) {
+          // Check for valid position and velocity values
+          const pos = positionAndVelocity.position;
+          const vel = positionAndVelocity.velocity;
+
+          if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z) ||
+            isNaN(vel.x) || isNaN(vel.y) || isNaN(vel.z)) {
+            console.error(`Satellite ${i} (${satNames[i]}) has NaN values in propagation result`);
+            return;
+          }
+
+          // Update state directly
+          allSatState[i][0] = pos.x / 6371;
+          allSatState[i][1] = pos.y / 6371;
+          allSatState[i][2] = pos.z / 6371;
+          allSatState[i][3] = vel.x / 6371;
+          allSatState[i][4] = vel.y / 6371;
+          allSatState[i][5] = vel.z / 6371;
+        } else {
+          console.error(`Satellite.js propagation returned invalid result for satellite ${i} (${satNames[i]})`);
+          console.error(`Propagation result:`, positionAndVelocity);
+        }
+      } catch (error) {
+        console.error(`Failed to propagate satellite ${i} (${satNames[i]}) with satellite.js:`, error);
+        console.error(`Satrec details:`, {
+          satnum: tle.satnum,
+          epochyr: tle.epochyr,
+          epochdays: tle.epochdays,
+          ndot: tle.ndot,
+          nddot: tle.nddot,
+          bstar: tle.bstar,
+          inclo: tle.inclo,
+          nodeo: tle.nodeo,
+          ecco: tle.ecco,
+          argpo: tle.argpo,
+          mo: tle.mo,
+          no: tle.no
+        });
       }
     }
   }
@@ -439,6 +526,15 @@ function animate() {
   if (frameTimeElement) frameTimeElement.textContent = frameTime.toFixed(2);
   if (renderTimeElement) renderTimeElement.textContent = renderTime.toFixed(2);
   if (propTimeElement) propTimeElement.textContent = propagationTime.toFixed(2);
+
+  // Update propagation method display
+  if (useSatelliteJS) {
+    const validSatrecs = satRecs.filter(s => s !== null).length;
+    const propMethodElement = document.getElementById("prop-method");
+    if (propMethodElement) {
+      propMethodElement.textContent = `Satellite.js: ${validSatrecs} satellites`;
+    }
+  }
 
   stats.end();
 }
@@ -639,6 +735,21 @@ async function addSatellites() {
           period: sat.period,
         }))
       );
+
+      // Create satrecs for satellite.js propagation
+      const satRecsBatch = [];
+      for (let i = 0; i < newSatellites.length; i++) {
+        try {
+          const sat = newSatellites[i];
+          const satrec = satellite.twoline2satrec(sat.tle.line1, sat.tle.line2);
+          satRecsBatch.push(satrec);
+        } catch (error) {
+          console.warn(`Failed to create satrec for new satellite ${i}:`, error);
+          // Add null to maintain array alignment
+          satRecsBatch.push(null);
+        }
+      }
+      satRecs.push(...satRecsBatch);
     }
 
     // Recreate satellite points with new count
@@ -665,7 +776,7 @@ function clearSatellites() {
   satNames = [];
   satN = 0;
   satelliteData = [];
-  satRecs = []; // Clear satRecs array
+  satRecs = []; // Clear satrecs array
 
   // Reset simulation time
   simulationTime = new Date();
@@ -871,6 +982,50 @@ async function loadFromTurionAPI() {
         period: sat.period,
       }))
     );
+
+    // Create satrecs for satellite.js propagation
+    const satRecsBatch = [];
+    for (let i = 0; i < satellites.length; i++) {
+      try {
+        const sat = satellites[i];
+
+        // Validate TLE before creating satrec
+        if (!validateTLE(sat.tle)) {
+          console.warn(`Invalid TLE data for satellite ${i} (${sat.name}):`, sat.tle);
+          satRecsBatch.push(null);
+          continue;
+        }
+
+        const satrec = satellite.twoline2satrec(sat.tle.line1, sat.tle.line2);
+
+        // Debug satrec creation
+        if (Math.random() < 0.01) { // 1% chance to log
+          console.log(`Created satrec for satellite ${i} (${sat.name}):`, {
+            satnum: satrec.satnum,
+            epochyr: satrec.epochyr,
+            epochdays: satrec.epochdays,
+            inclo: satrec.inclo,
+            nodeo: satrec.nodeo,
+            ecco: satrec.ecco,
+            argpo: satrec.argpo,
+            mo: satrec.mo,
+            no: satrec.no
+          });
+        }
+
+        satRecsBatch.push(satrec);
+      } catch (error) {
+        console.warn(`Failed to create satrec for satellite ${i}:`, error);
+        // Add null to maintain array alignment
+        satRecsBatch.push(null);
+      }
+    }
+    satRecs.push(...satRecsBatch);
+
+    // Log propagation method summary
+    const validSatrecs = satRecsBatch.filter(s => s !== null).length;
+    const invalidSatrecs = satRecsBatch.filter(s => s === null).length;
+    console.log(`Turion API: ${validSatrecs} satellites created satrecs successfully, ${invalidSatrecs} failed`);
 
     // Recreate satellite points
     recreateSatellitePoints();

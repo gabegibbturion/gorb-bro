@@ -1,16 +1,15 @@
+import { gstime } from "satellite.js";
 import Stats from "stats.js";
 import SunCalc from "suncalc";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EnhancedGlobe } from "./EnhancedGlobe";
-import { EntityManager, type RenderingSystem } from "./EntityManager";
+import { EntityManager, type RenderingSystem, type SatelliteData } from "./EntityManager";
 import type { OrbitalElements } from "./OrbitalElements";
-import { SatelliteEntity } from "./SatelliteEntity";
-import { TLEParser } from "./TLEParser";
 import { OrbitManager, type OrbitRenderingSystem } from "./OrbitManager";
 import { TileGlobe } from "./TileGlobe";
 import { TileProvider } from "./TileProvider";
-import { gstime } from "satellite.js";
+import { TLEParser } from "./TLEParser";
 
 export const GlobeType = {
     BASIC: "basic",
@@ -55,7 +54,7 @@ export class GlobeEngine {
     private isRunning: boolean = false;
     private raycaster: THREE.Raycaster;
     private mouse: THREE.Vector2;
-    private selectedEntity: SatelliteEntity | null = null;
+    private selectedEntity: SatelliteData | null = null;
     private enableGlobeRotation: boolean = true;
     private enableCameraRotation: boolean = true;
     private initialCameraPosition: THREE.Vector3 = new THREE.Vector3();
@@ -71,8 +70,8 @@ export class GlobeEngine {
     // Event callbacks
     private onEngineReady?: () => void;
     private onTimeUpdate?: (time: Date) => void;
-    private onSatelliteUpdate?: (satellites: SatelliteEntity[]) => void;
-    private onEntitySelected?: (entity: SatelliteEntity | null) => void;
+    private onSatelliteUpdate?: (satellites: SatelliteData[]) => void;
+    private onEntitySelected?: (entity: SatelliteData | null) => void;
 
     // Timing variables for performance monitoring
     private frameStartTime: number = 0;
@@ -122,7 +121,7 @@ export class GlobeEngine {
         // Disable Three.js shader errors globally for better performance
         THREE.WebGLRenderer.prototype.debug = {
             checkShaderErrors: false,
-            onShaderError: () => {},
+            onShaderError: () => { },
         };
 
         this.createScene();
@@ -483,12 +482,19 @@ export class GlobeEngine {
         }
 
         // Manual raycasting for instanced geometry
-        let closestSatellite: SatelliteEntity | null = null;
+        let closestSatellite: SatelliteData | null = null;
         let closestDistance = Infinity;
         const selectionThreshold = 0.05; // Adjust based on satellite size
 
-        satellites.forEach((satellite) => {
-            const satellitePosition = satellite.getPosition();
+        satellites.forEach((satellite, index) => {
+            // Get position from our direct arrays
+            const i3 = index * 3;
+            const positions = this.entityManager.getPositionsArray();
+            const satellitePosition = new THREE.Vector3(
+                positions[i3],
+                positions[i3 + 1],
+                positions[i3 + 2]
+            );
 
             // Calculate distance from ray to satellite position
             const rayOrigin = this.raycaster.ray.origin;
@@ -522,17 +528,17 @@ export class GlobeEngine {
         }
     }
 
-    private selectEntity(entity: SatelliteEntity | null): void {
+    private selectEntity(entity: SatelliteData | null): void {
         // Clear previous selection visual feedback
         if (this.selectedEntity) {
-            this.selectedEntity.setSelected(false);
+            this.selectedEntity.isSelected = false;
         }
 
         this.selectedEntity = entity;
 
         // Add visual feedback for new selection
         if (this.selectedEntity) {
-            this.selectedEntity.setSelected(true);
+            this.selectedEntity.isSelected = true;
         }
 
         // Notify callback
@@ -681,23 +687,23 @@ export class GlobeEngine {
     }
 
     // Public API
-    public addSatellite(orbitalElements: OrbitalElements, options?: any): SatelliteEntity | null {
+    public addSatellite(orbitalElements: OrbitalElements, options?: any): SatelliteData | null {
         return this.entityManager.addSatellite(orbitalElements, options);
     }
 
-    public addRandomSatellite(name?: string): SatelliteEntity | null {
+    public addRandomSatellite(name?: string): SatelliteData | null {
         return this.entityManager.addRandomSatellite(name);
     }
 
-    public addValidSatellite(options?: any): SatelliteEntity | null {
+    public addValidSatellite(options?: any): SatelliteData | null {
         return this.entityManager.addValidSatellite(options);
     }
 
-    public addRandomTLEFromCOE(name?: string, altitudeRange?: [number, number]): SatelliteEntity | null {
+    public addRandomTLEFromCOE(name?: string, altitudeRange?: [number, number]): SatelliteData | null {
         return this.entityManager.addRandomTLEFromCOE(name, altitudeRange);
     }
 
-    public addRandomTLEFromCOEBatch(count: number, namePrefix?: string, altitudeRange?: [number, number], colors?: number[]): SatelliteEntity[] {
+    public addRandomTLEFromCOEBatch(count: number, namePrefix?: string, altitudeRange?: [number, number], colors?: number[]): SatelliteData[] {
         return this.entityManager.addRandomTLEFromCOEBatch(count, namePrefix, altitudeRange, colors);
     }
 
@@ -705,11 +711,11 @@ export class GlobeEngine {
         return this.entityManager.removeSatellite(id);
     }
 
-    public getSatellite(id: string): SatelliteEntity | undefined {
+    public getSatellite(id: string): SatelliteData | undefined {
         return this.entityManager.getSatellite(id);
     }
 
-    public getAllSatellites(): SatelliteEntity[] {
+    public getAllSatellites(): SatelliteData[] {
         return this.entityManager.getAllSatellites();
     }
 
@@ -802,15 +808,15 @@ export class GlobeEngine {
         this.onTimeUpdate = callback;
     }
 
-    public onSatelliteUpdateCallback(callback: (satellites: SatelliteEntity[]) => void): void {
+    public onSatelliteUpdateCallback(callback: (satellites: SatelliteData[]) => void): void {
         this.onSatelliteUpdate = callback;
     }
 
-    public onEntitySelectedCallback(callback: (entity: SatelliteEntity | null) => void): void {
+    public onEntitySelectedCallback(callback: (entity: SatelliteData | null) => void): void {
         this.onEntitySelected = callback;
     }
 
-    public getSelectedEntity(): SatelliteEntity | null {
+    public getSelectedEntity(): SatelliteData | null {
         return this.selectedEntity;
     }
 
@@ -818,7 +824,7 @@ export class GlobeEngine {
         this.selectEntity(null);
     }
 
-    public loadTLEFromFile(content: string, maxCount: number = 0): SatelliteEntity[] {
+    public loadTLEFromFile(content: string, maxCount: number = 0): SatelliteData[] {
         const parsedTLEs = TLEParser.parseTLEFile(content, maxCount);
 
         console.log(`Parsed ${parsedTLEs.length} TLEs from file`);
@@ -840,7 +846,7 @@ export class GlobeEngine {
         return this.entityManager.addSatellitesBatch(satellitesData);
     }
 
-    public loadTLEFromURL(url: string, maxCount: number = 0): Promise<SatelliteEntity[]> {
+    public loadTLEFromURL(url: string, maxCount: number = 0): Promise<SatelliteData[]> {
         return fetch(url)
             .then((response) => response.text())
             .then((content) => this.loadTLEFromFile(content, maxCount))
@@ -1112,6 +1118,20 @@ export class GlobeEngine {
 
     public getCustomTileUrl(): string {
         return this.options.customTileUrl;
+    }
+
+    /**
+     * Set propagation method for all satellites
+     */
+    public setPropagationMethodForAll(method: "satellite.js" | "k2"): void {
+        this.entityManager.setPropagationMethodForAll(method);
+    }
+
+    /**
+     * Set default propagation method for new satellites
+     */
+    public setDefaultPropagationMethod(method: "satellite.js" | "k2"): void {
+        this.entityManager.setDefaultPropagationMethod(method);
     }
 
     public getAvailableTileProviders(): { value: TileProvider; label: string; description: string }[] {
