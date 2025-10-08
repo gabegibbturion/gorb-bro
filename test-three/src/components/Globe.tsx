@@ -41,6 +41,7 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
     const [cloudsVisible, setCloudsVisible] = useState(true);
     const [atmosphereVisible, setAtmosphereVisible] = useState(true);
     const [meshUpdatesEnabled, setMeshUpdatesEnabled] = useState(true);
+    const [webWorkersEnabled, setWebWorkersEnabled] = useState(true);
     const [globeType, setGlobeType] = useState<GlobeType>(GlobeType.BASIC);
     const [timelineOffset, setTimelineOffset] = useState(0); // Offset from center in hours
     const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
@@ -360,6 +361,13 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
         const newValue = !meshUpdatesEnabled;
         setMeshUpdatesEnabled(newValue);
         engineRef.current.setMeshUpdatesEnabled(newValue);
+    };
+
+    const toggleWebWorkers = () => {
+        if (!engineRef.current) return;
+        const newValue = !webWorkersEnabled;
+        setWebWorkersEnabled(newValue);
+        engineRef.current.setWebWorkersEnabled(newValue);
     };
 
     const forceUpdateMesh = () => {
@@ -704,6 +712,31 @@ export default function Globe({ style, className, onEngineReady, onSatelliteUpda
                                     <div style={{ fontSize: "15px", color: "#aaa" }}>{option.description}</div>
                                 </label>
                             ))}
+                        </div>
+                    </div>
+
+                    {/* Web Workers Controls */}
+                    <div style={{ marginBottom: "8px" }}>
+                        <div style={{ marginBottom: "3px", fontWeight: "bold", fontSize: "15px" }}>Web Workers:</div>
+                        <div style={{ display: "flex", gap: "3px", marginBottom: "3px" }}>
+                            <button
+                                onClick={toggleWebWorkers}
+                                style={{
+                                    flex: 1,
+                                    padding: "3px 6px",
+                                    fontSize: "15px",
+                                    backgroundColor: webWorkersEnabled ? "#4CAF50" : "#F44336",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "2px",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                {webWorkersEnabled ? "Disable" : "Enable"}
+                            </button>
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#666", marginBottom: "3px" }}>
+                            {webWorkersEnabled ? "Using web workers for propagation" : "Using synchronous processing"}
                         </div>
                     </div>
 

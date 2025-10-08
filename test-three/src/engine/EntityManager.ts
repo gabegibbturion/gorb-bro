@@ -13,6 +13,7 @@ export interface EntityManagerOptions {
     // renderingSystem?: RenderingSystem; // Only instanced rendering supported
     enableOcclusionCulling?: boolean; // Toggle occlusion culling
     particleSize?: number; // Size of particles
+    enableWebWorkers?: boolean; // Toggle web workers for propagation
 }
 
 // Direct satellite data structure for performance
@@ -30,7 +31,7 @@ export interface SatelliteData {
     propagationMethod: "satellite.js" | "k2";
     // K2 state for direct propagation
     k2State: number[]; // [x, y, z, vx, vy, vz] in km
-    lastUpdateTime: Date | null;
+    lastUpdateTime: number | null;
     isVisible: boolean;
     isSelected: boolean;
 }
@@ -44,16 +45,17 @@ export class EntityManager {
     private meshUpdatesEnabled: boolean = true; // Control mesh updates
     private defaultPropagationMethod: "satellite.js" | "k2" = "satellite.js"; // Default propagation method for new satellites
 
-    // Web worker for propagation with shared memory
+    // Web worker for propagation with ring buffer shared memory
     private propagationWorker: Worker | null = null;
     private pendingBatches: Map<number, { resolve: (result: any) => void; reject: (error: any) => void }> = new Map();
 
-    // Shared memory for direct access between main thread and worker
-    private sharedArrayBuffer: SharedArrayBuffer | null = null;
-    private sharedPositions: Float32Array | null = null;
-    private sharedColors: Float32Array | null = null;
-    private sharedVisibility: Float32Array | null = null;
-    private sharedSizes: Float32Array | null = null;
+    // Ring buffer shared memory with atomics for lock-free communication
+    private sharedBuffer: SharedArrayBuffer | null = null;
+    private positionsBuffer: Float32Array | null = null;
+    private colorsBuffer: Float32Array | null = null;
+    private visibilityBuffer: Float32Array | null = null;
+    private sizesBuffer: Float32Array | null = null;
+    private controlBuffer: Int32Array | null = null; // For atomic operations
 
     // Direct position and color arrays for maximum performance
     private positions: Float32Array;
@@ -92,6 +94,7 @@ export class EntityManager {
             // renderingSystem: "instanced", // Only instanced mesh supported
             enableOcclusionCulling: false, // Default to disabled
             particleSize: 0.01, // Default particle size
+            enableWebWorkers: true, // Default to enabled
             ...options,
         };
 
@@ -104,8 +107,8 @@ export class EntityManager {
         // Initialize all arrays to hidden state
         this.initializeArrays();
 
-        // Initialize shared memory
-        this.initializeSharedMemory();
+        // Initialize ring buffer shared memory
+        this.initializeRingBuffer();
 
         // Initialize web worker
         this.initializeWorker();
@@ -129,64 +132,90 @@ export class EntityManager {
         }
     }
 
-    private initializeSharedMemory(): void {
+    private initializeRingBuffer(): void {
         try {
-            // Calculate total memory needed
+            // Check if SharedArrayBuffer is available
+            if (typeof SharedArrayBuffer === 'undefined') {
+                console.warn('SharedArrayBuffer not available, using direct memory approach');
+                this.sharedBuffer = null;
+                return;
+            }
+
+            // Calculate buffer sizes
             const positionsSize = this.options.maxSatellites * 3 * 4; // 3 floats * 4 bytes
             const colorsSize = this.options.maxSatellites * 3 * 4;
             const visibilitySize = this.options.maxSatellites * 4;
             const sizesSize = this.options.maxSatellites * 4;
+            const controlSize = 8 * 4; // 8 control integers * 4 bytes
 
-            const totalSize = positionsSize + colorsSize + visibilitySize + sizesSize;
+            const totalSize = positionsSize + colorsSize + visibilitySize + sizesSize + controlSize;
 
-            // Create SharedArrayBuffer
-            this.sharedArrayBuffer = new SharedArrayBuffer(totalSize);
+            // Create shared buffer
+            this.sharedBuffer = new SharedArrayBuffer(totalSize);
 
-            // Create views into the shared memory
+            // Create views into the shared buffer
             let offset = 0;
-            this.sharedPositions = new Float32Array(this.sharedArrayBuffer, offset, this.options.maxSatellites * 3);
+            this.positionsBuffer = new Float32Array(this.sharedBuffer, offset, this.options.maxSatellites * 3);
             offset += positionsSize;
 
-            this.sharedColors = new Float32Array(this.sharedArrayBuffer, offset, this.options.maxSatellites * 3);
+            this.colorsBuffer = new Float32Array(this.sharedBuffer, offset, this.options.maxSatellites * 3);
             offset += colorsSize;
 
-            this.sharedVisibility = new Float32Array(this.sharedArrayBuffer, offset, this.options.maxSatellites);
+            this.visibilityBuffer = new Float32Array(this.sharedBuffer, offset, this.options.maxSatellites);
             offset += visibilitySize;
 
-            this.sharedSizes = new Float32Array(this.sharedArrayBuffer, offset, this.options.maxSatellites);
+            this.sizesBuffer = new Float32Array(this.sharedBuffer, offset, this.options.maxSatellites);
+            offset += sizesSize;
 
-            // Initialize shared memory to hidden state
+            this.controlBuffer = new Int32Array(this.sharedBuffer, offset, 8);
+
+            // Initialize control buffer
+            this.controlBuffer[0] = 0; // Read index
+            this.controlBuffer[1] = 0; // Write index
+            this.controlBuffer[2] = 0; // Batch count
+            this.controlBuffer[3] = 0; // Worker status (0=idle, 1=working, 2=complete)
+            this.controlBuffer[4] = 0; // Error flag
+            this.controlBuffer[5] = 0; // Time stamp
+            this.controlBuffer[6] = 0; // Batch size
+            this.controlBuffer[7] = 0; // Success count
+
+            // Initialize data arrays to hidden state
             this.initializeSharedArrays();
 
-            console.log('Shared memory initialized successfully');
+            console.log('Ring buffer shared memory initialized successfully');
         } catch (error) {
-            console.error('Failed to initialize shared memory:', error);
-            // Fallback to regular arrays
-            this.sharedArrayBuffer = null;
+            console.error('Failed to initialize ring buffer:', error);
+            this.sharedBuffer = null;
         }
     }
 
     private initializeSharedArrays(): void {
-        if (!this.sharedPositions || !this.sharedColors || !this.sharedVisibility || !this.sharedSizes) return;
+        if (!this.positionsBuffer || !this.colorsBuffer || !this.visibilityBuffer || !this.sizesBuffer) return;
 
         for (let i = 0; i < this.options.maxSatellites; i++) {
             const i3 = i * 3;
             // Hidden position (far away)
-            this.sharedPositions[i3] = 10000;
-            this.sharedPositions[i3 + 1] = 10000;
-            this.sharedPositions[i3 + 2] = 10000;
+            this.positionsBuffer[i3] = 10000;
+            this.positionsBuffer[i3 + 1] = 10000;
+            this.positionsBuffer[i3 + 2] = 10000;
             // Black color (invisible)
-            this.sharedColors[i3] = 0;
-            this.sharedColors[i3 + 1] = 0;
-            this.sharedColors[i3 + 2] = 0;
+            this.colorsBuffer[i3] = 0;
+            this.colorsBuffer[i3 + 1] = 0;
+            this.colorsBuffer[i3 + 2] = 0;
             // Hidden
-            this.sharedVisibility[i] = 0;
+            this.visibilityBuffer[i] = 0;
             // Default size
-            this.sharedSizes[i] = 1;
+            this.sizesBuffer[i] = 1;
         }
     }
 
     private initializeWorker(): void {
+        // Check if web workers are enabled
+        if (!this.options.enableWebWorkers) {
+            console.log('Web workers disabled, using synchronous processing');
+            return;
+        }
+
         try {
             // Create worker from the worker file
             this.propagationWorker = new Worker(new URL('../workers/satellitePropagationWorker.ts', import.meta.url), {
@@ -199,17 +228,13 @@ export class EntityManager {
 
                 switch (type) {
                     case 'INITIALIZED':
-                        console.log('Propagation worker initialized');
-                        // Set up shared memory in worker
-                        this.setupWorkerSharedMemory();
+                        console.log('Propagation worker initialized (using ring buffer)');
+                        // Send shared buffer to worker
+                        this.setupWorkerSharedBuffer();
                         break;
 
-                    case 'SHARED_MEMORY_SET':
-                        console.log('Shared memory set up in worker');
-                        break;
-
-                    case 'BATCH_COMPLETE':
-                        this.handleBatchComplete(data);
+                    case 'RING_BUFFER_READY':
+                        console.log('Ring buffer set up in worker');
                         break;
 
                     case 'PROPAGATION_ERROR':
@@ -233,49 +258,20 @@ export class EntityManager {
         }
     }
 
-    private setupWorkerSharedMemory(): void {
-        if (!this.propagationWorker || !this.sharedArrayBuffer) return;
+    private setupWorkerSharedBuffer(): void {
+        if (!this.propagationWorker || !this.sharedBuffer) return;
 
-        // Create shared memory layout for worker
-        const sharedMemoryLayout = {
-            positions: this.sharedPositions!,
-            colors: this.sharedColors!,
-            visibility: this.sharedVisibility!,
-            sizes: this.sharedSizes!,
-            satelliteData: this.getAllSatellites(),
-            maxSatellites: this.options.maxSatellites
-        };
-
-        // Send shared memory to worker
+        // Send shared buffer to worker
         this.propagationWorker.postMessage({
-            type: 'SET_SHARED_MEMORY',
-            data: sharedMemoryLayout
+            type: 'SET_SHARED_BUFFER',
+            data: {
+                sharedBuffer: this.sharedBuffer,
+                maxSatellites: this.options.maxSatellites
+            }
         });
     }
 
-    private handleBatchComplete(data: any): void {
-        const { batchIndex, successCount } = data;
-
-        // Copy from shared memory to main arrays for rendering
-        this.copyFromSharedMemory();
-
-        // Resolve the pending batch
-        const pending = this.pendingBatches.get(batchIndex);
-        if (pending) {
-            pending.resolve({ batchIndex, successCount });
-            this.pendingBatches.delete(batchIndex);
-        }
-    }
-
-    private copyFromSharedMemory(): void {
-        if (!this.sharedPositions || !this.sharedColors || !this.sharedVisibility || !this.sharedSizes) return;
-
-        // Direct copy from shared memory to main arrays
-        this.positions.set(this.sharedPositions);
-        this.colors.set(this.sharedColors);
-        this.visibility.set(this.sharedVisibility);
-        this.sizes.set(this.sharedSizes);
-    }
+    // Ring buffer approach - no batch complete handling needed
 
     private handlePropagationError(error: any): void {
         // Reject all pending batches
@@ -464,6 +460,39 @@ export class EntityManager {
         return false;
     }
 
+    // Shared memory propagation methods
+    private propagateSatelliteJsToSharedMemory(satelliteData: SatelliteData, time: Date, index: number): boolean {
+        if (!this.positionsBuffer) return false;
+
+        try {
+            const positionAndVelocity = satellite.propagate(satelliteData.satrec, time);
+
+            if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
+                const pos = positionAndVelocity.position;
+
+                // Check for NaN values
+                if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z)) {
+                    return false;
+                }
+
+                // Convert from km to Three.js units (globe radius = 1)
+                const earthRadiusKm = 6371;
+                const scaleFactor = 1 / earthRadiusKm;
+
+                // Directly update the shared memory positions buffer
+                const i3 = index * 3;
+                this.positionsBuffer[i3] = pos.x * scaleFactor;
+                this.positionsBuffer[i3 + 1] = pos.y * scaleFactor;
+                this.positionsBuffer[i3 + 2] = pos.z * scaleFactor;
+
+                return true;
+            }
+        } catch (error) {
+            // Propagation error
+        }
+        return false;
+    }
+
     private propagateK2(satelliteData: SatelliteData, time: Date, index: number): boolean {
         // Initialize K2 state if needed
         if (satelliteData.k2State[0] === 0 && satelliteData.k2State[1] === 0 && satelliteData.k2State[2] === 0) {
@@ -471,7 +500,7 @@ export class EntityManager {
         }
 
         // Calculate time step in seconds
-        const timeStep = (time.getTime() - (satelliteData.lastUpdateTime?.getTime() || time.getTime())) / 1000;
+        const timeStep = (time.getTime() - (satelliteData.lastUpdateTime || time.getTime())) / 1000;
 
         if (Math.abs(timeStep) < 0.001) return false; // Skip very small time steps
 
@@ -486,6 +515,34 @@ export class EntityManager {
         this.positions[i3] = satelliteData.k2State[0] * scaleFactor;
         this.positions[i3 + 1] = satelliteData.k2State[1] * scaleFactor;
         this.positions[i3 + 2] = satelliteData.k2State[2] * scaleFactor;
+
+        return true;
+    }
+
+    private propagateK2ToSharedMemory(satelliteData: SatelliteData, time: Date, index: number): boolean {
+        if (!this.positionsBuffer) return false;
+
+        // Initialize K2 state if needed
+        if (satelliteData.k2State[0] === 0 && satelliteData.k2State[1] === 0 && satelliteData.k2State[2] === 0) {
+            this.initializeK2State(satelliteData);
+        }
+
+        // Calculate time step in seconds
+        const timeStep = (time.getTime() - (satelliteData.lastUpdateTime || time.getTime())) / 1000;
+
+        if (Math.abs(timeStep) < 0.001) return false; // Skip very small time steps
+
+        // Apply K2 propagation
+        this.applyK2Propagation(satelliteData, timeStep);
+
+        // Convert to Three.js units and directly update shared memory positions buffer
+        const earthRadiusKm = 6371;
+        const scaleFactor = 1 / earthRadiusKm;
+
+        const i3 = index * 3;
+        this.positionsBuffer[i3] = satelliteData.k2State[0] * scaleFactor;
+        this.positionsBuffer[i3 + 1] = satelliteData.k2State[1] * scaleFactor;
+        this.positionsBuffer[i3 + 2] = satelliteData.k2State[2] * scaleFactor;
 
         return true;
     }
@@ -607,25 +664,90 @@ export class EntityManager {
         time: Date,
         startIndex: number
     ): void {
-        if (!this.propagationWorker || !this.sharedArrayBuffer) {
+        if (!this.propagationWorker) {
             this.processSatelliteBatchSync(satellites, time, startIndex);
             return;
         }
 
-        // Create batch data for worker (no need to send satellite data - it's in shared memory)
-        const batchData = {
-            batchIndex: Math.floor(startIndex / 1000),
-            startIndex: startIndex,
-            batchSize: satellites.length,
-            time: time.getTime()
-        };
-
-        // Send batch to worker
-        this.propagationWorker.postMessage({
-            type: 'PROPAGATE_BATCH',
-            data: batchData
-        });
+        // Use direct shared memory processing if available
+        if (this.sharedBuffer && this.controlBuffer) {
+            this.processSatelliteBatchWithDirectSharedMemory(satellites, time, startIndex);
+        } else {
+            // Fallback to synchronous processing
+            this.processSatelliteBatchSync(satellites, time, startIndex);
+        }
     }
+
+    private processSatelliteBatchWithDirectSharedMemory(
+        satellites: SatelliteData[],
+        time: Date,
+        startIndex: number
+    ): void {
+        if (!this.controlBuffer || !this.positionsBuffer || !this.colorsBuffer || !this.visibilityBuffer || !this.sizesBuffer) {
+            // Fallback to synchronous processing
+            this.processSatelliteBatchSync(satellites, time, startIndex);
+            return;
+        }
+
+        // Process satellites directly in shared memory (no message passing)
+        let successCount = 0;
+
+        for (let i = 0; i < satellites.length; i++) {
+            const satelliteData = satellites[i];
+            const globalIndex = startIndex + i;
+
+            if (globalIndex >= this.options.maxSatellites) break;
+
+            // Skip update if time hasn't changed significantly
+            if (satelliteData.lastUpdateTime && Math.abs(time.getTime() - satelliteData.lastUpdateTime) < 50) {
+                continue;
+            }
+
+            let propagationSuccess = false;
+
+            // Direct propagation based on method
+            if (satelliteData.propagationMethod === "k2") {
+                propagationSuccess = this.propagateK2ToSharedMemory(satelliteData, time, globalIndex);
+            } else {
+                propagationSuccess = this.propagateSatelliteJsToSharedMemory(satelliteData, time, globalIndex);
+            }
+
+            if (propagationSuccess) {
+                // Update color, visibility, and size in shared memory
+                const i3 = globalIndex * 3;
+
+                // Update color in shared memory
+                this.tempColor.setHex(satelliteData.color);
+                this.colorsBuffer[i3] = this.tempColor.r;
+                this.colorsBuffer[i3 + 1] = this.tempColor.g;
+                this.colorsBuffer[i3 + 2] = this.tempColor.b;
+
+                // Update visibility and size in shared memory
+                this.visibilityBuffer[globalIndex] = satelliteData.isVisible ? 1 : 0;
+                this.sizesBuffer[globalIndex] = satelliteData.size;
+
+                // Update last update time
+                satelliteData.lastUpdateTime = time.getTime();
+                successCount++;
+            }
+        }
+
+        // Copy results from shared memory to main arrays
+        this.copyFromSharedMemory();
+    }
+
+
+    private copyFromSharedMemory(): void {
+        if (!this.positionsBuffer || !this.colorsBuffer || !this.visibilityBuffer || !this.sizesBuffer) return;
+
+        // Direct copy from shared memory to main arrays
+        this.positions.set(this.positionsBuffer);
+        this.colors.set(this.colorsBuffer);
+        this.visibility.set(this.visibilityBuffer);
+        this.sizes.set(this.sizesBuffer);
+    }
+
+    // Ring buffer approach - no transferable objects needed
 
     private processSatelliteBatchSync(
         satellites: SatelliteData[],
@@ -638,7 +760,7 @@ export class EntityManager {
             const globalIndex = startIndex + i;
 
             // Skip update if time hasn't changed significantly
-            if (satelliteData.lastUpdateTime && Math.abs(time.getTime() - satelliteData.lastUpdateTime.getTime()) < 50) {
+            if (satelliteData.lastUpdateTime && Math.abs(time.getTime() - satelliteData.lastUpdateTime) < 50) {
                 continue;
             }
 
@@ -668,7 +790,7 @@ export class EntityManager {
                 this.sizes[globalIndex] = satelliteData.size;
 
                 // Update last update time
-                satelliteData.lastUpdateTime = time;
+                satelliteData.lastUpdateTime = time.getTime();
             }
         }
     }
@@ -1170,6 +1292,33 @@ export class EntityManager {
     }
 
     /**
+     * Enable or disable web workers for propagation
+     */
+    public setWebWorkersEnabled(enabled: boolean): void {
+        this.options.enableWebWorkers = enabled;
+
+        if (enabled) {
+            // Reinitialize worker if enabling
+            this.initializeWorker();
+        } else {
+            // Terminate worker if disabling
+            if (this.propagationWorker) {
+                this.propagationWorker.terminate();
+                this.propagationWorker = null;
+            }
+        }
+
+        console.log(`Web workers ${enabled ? "enabled" : "disabled"}`);
+    }
+
+    /**
+     * Check if web workers are enabled
+     */
+    public getWebWorkersEnabled(): boolean {
+        return this.options.enableWebWorkers;
+    }
+
+    /**
      * Manually trigger a mesh update
      * Useful after adding many satellites with mesh updates disabled
      * This performs a one-time update without enabling automatic updates
@@ -1203,12 +1352,13 @@ export class EntityManager {
         }
         this.pendingBatches.clear();
 
-        // Clean up shared memory
-        this.sharedArrayBuffer = null;
-        this.sharedPositions = null;
-        this.sharedColors = null;
-        this.sharedVisibility = null;
-        this.sharedSizes = null;
+        // Clean up ring buffer
+        this.sharedBuffer = null;
+        this.positionsBuffer = null;
+        this.colorsBuffer = null;
+        this.visibilityBuffer = null;
+        this.sizesBuffer = null;
+        this.controlBuffer = null;
 
         // Clean up instanced mesh
         if (this.instancedMesh) {

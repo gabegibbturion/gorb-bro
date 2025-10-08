@@ -2,7 +2,7 @@ import * as satellite from "satellite.js";
 
 // Worker message types
 export interface WorkerMessage {
-    type: 'INITIALIZE' | 'PROPAGATE_BATCH' | 'SET_SHARED_MEMORY';
+    type: 'INITIALIZE' | 'SET_SHARED_BUFFER' | 'PROCESS_SATELLITES';
     data?: any;
 }
 
@@ -10,28 +10,25 @@ export interface PropagationBatch {
     batchIndex: number;
     startIndex: number;
     batchSize: number;
-    time: number; // timestamp
+    time: number;
+    satellites: SatelliteData[];
 }
 
 export interface SatelliteData {
-    id: string;
-    name: string;
-    satrec: any;
+    satrec: satellite.SatRec | null;
+    propagationMethod: "satellite.js" | "k2";
+    lastUpdateTime: number | null;
+    isVisible: boolean;
     color: number;
     size: number;
-    showTrail: boolean;
-    trailLength: number;
-    trailColor: number;
-    showOrbit: boolean;
-    orbitColor: number;
-    propagationMethod: "satellite.js" | "k2";
-    k2State: number[];
-    lastUpdateTime: number | null; // timestamp
-    isVisible: boolean;
-    isSelected: boolean;
+    tle?: {
+        line1: string;
+        line2: string;
+        epoch: string;
+    };
+    k2State?: Float64Array;
 }
 
-// Shared memory structure
 export interface SharedMemoryLayout {
     positions: Float32Array;
     colors: Float32Array;
@@ -43,22 +40,54 @@ export interface SharedMemoryLayout {
 
 // Worker state
 let isInitialized = false;
-let sharedMemory: SharedMemoryLayout | null = null;
+let sharedBuffer: SharedArrayBuffer | null = null;
+let positionsBuffer: Float32Array | null = null;
+let colorsBuffer: Float32Array | null = null;
+let visibilityBuffer: Float32Array | null = null;
+let sizesBuffer: Float32Array | null = null;
+let controlBuffer: Int32Array | null = null;
+let maxSatellites: number = 0;
 
 // Initialize worker
 function initializeWorker(): void {
     isInitialized = true;
-    console.log('Satellite propagation worker initialized');
+    console.log('Satellite propagation worker initialized (using ring buffer)');
 }
 
-// Set up shared memory
-function setSharedMemory(memory: SharedMemoryLayout): void {
-    sharedMemory = memory;
-    console.log('Shared memory set up in worker');
+// Set up shared buffer
+function setSharedBuffer(buffer: SharedArrayBuffer, maxSats: number): void {
+    sharedBuffer = buffer;
+    maxSatellites = maxSats;
+
+    // Create views into the shared buffer
+    let offset = 0;
+    const positionsSize = maxSatellites * 3 * 4;
+    const colorsSize = maxSatellites * 3 * 4;
+    const visibilitySize = maxSatellites * 4;
+    const sizesSize = maxSatellites * 4;
+
+    positionsBuffer = new Float32Array(sharedBuffer, offset, maxSatellites * 3);
+    offset += positionsSize;
+
+    colorsBuffer = new Float32Array(sharedBuffer, offset, maxSatellites * 3);
+    offset += colorsSize;
+
+    visibilityBuffer = new Float32Array(sharedBuffer, offset, maxSatellites);
+    offset += visibilitySize;
+
+    sizesBuffer = new Float32Array(sharedBuffer, offset, maxSatellites);
+    offset += sizesSize;
+
+    controlBuffer = new Int32Array(sharedBuffer, offset, 8);
+
+    console.log('Ring buffer set up in worker');
 }
 
-// Direct propagation methods for maximum performance with shared memory
-function propagateSatelliteJsShared(satelliteData: SatelliteData, time: Date, index: number): boolean {
+
+// Ring buffer propagation methods
+function propagateSatelliteJsRingBuffer(satelliteData: any, time: Date, index: number): boolean {
+    if (!positionsBuffer) return false;
+
     try {
         const positionAndVelocity = satellite.propagate(satelliteData.satrec, time);
 
@@ -74,72 +103,74 @@ function propagateSatelliteJsShared(satelliteData: SatelliteData, time: Date, in
             const earthRadiusKm = 6371;
             const scaleFactor = 1 / earthRadiusKm;
 
-            // Directly update the shared memory positions array
+            // Directly update the positions buffer
             const i3 = index * 3;
-            sharedMemory!.positions[i3] = pos.x * scaleFactor;
-            sharedMemory!.positions[i3 + 1] = pos.y * scaleFactor;
-            sharedMemory!.positions[i3 + 2] = pos.z * scaleFactor;
+            positionsBuffer[i3] = pos.x * scaleFactor;
+            positionsBuffer[i3 + 1] = pos.y * scaleFactor;
+            positionsBuffer[i3 + 2] = pos.z * scaleFactor;
 
             return true;
         }
     } catch (error) {
         // Propagation error
+        console.warn('Satellite.js propagation failed:', error);
     }
     return false;
 }
 
-function propagateK2Shared(satelliteData: SatelliteData, time: Date, index: number): boolean {
-    // Initialize K2 state if needed
-    if (satelliteData.k2State[0] === 0 && satelliteData.k2State[1] === 0 && satelliteData.k2State[2] === 0) {
-        initializeK2State(satelliteData);
-    }
+function propagateK2RingBuffer(satelliteData: any, time: Date, index: number): boolean {
+    if (!positionsBuffer) return false;
 
-    // Calculate time step in seconds
-    const timeStep = (time.getTime() - (satelliteData.lastUpdateTime || time.getTime())) / 1000;
-
-    if (Math.abs(timeStep) < 0.001) return false; // Skip very small time steps
-
-    // Apply K2 propagation
-    applyK2Propagation(satelliteData, timeStep);
-
-    // Convert to Three.js units and directly update shared memory positions array
-    const earthRadiusKm = 6371;
-    const scaleFactor = 1 / earthRadiusKm;
-
-    const i3 = index * 3;
-    sharedMemory!.positions[i3] = satelliteData.k2State[0] * scaleFactor;
-    sharedMemory!.positions[i3 + 1] = satelliteData.k2State[1] * scaleFactor;
-    sharedMemory!.positions[i3 + 2] = satelliteData.k2State[2] * scaleFactor;
-
-    return true;
-}
-
-// Legacy methods removed - using shared memory approach only
-
-function initializeK2State(satelliteData: SatelliteData): void {
     try {
-        const now = new Date();
-        const positionAndVelocity = satellite.propagate(satelliteData.satrec, now);
-
-        if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
-            const pos = positionAndVelocity.position;
-            const vel = positionAndVelocity.velocity;
-
-            // Store in km units for K2 propagation
-            satelliteData.k2State[0] = pos.x;
-            satelliteData.k2State[1] = pos.y;
-            satelliteData.k2State[2] = pos.z;
-            satelliteData.k2State[3] = vel.x;
-            satelliteData.k2State[4] = vel.y;
-            satelliteData.k2State[5] = vel.z;
+        // Initialize K2 state if needed
+        if (satelliteData.k2State[0] === 0 && satelliteData.k2State[1] === 0 && satelliteData.k2State[2] === 0) {
+            initializeK2State(satelliteData, time);
         }
+
+        // Calculate time step in seconds
+        const timeStep = (time.getTime() - (satelliteData.lastUpdateTime || time.getTime())) / 1000;
+
+        if (Math.abs(timeStep) < 0.001) return false; // Skip very small time steps
+
+        // Apply K2 propagation
+        applyK2Propagation(satelliteData, timeStep);
+
+        // Convert to Three.js units and directly update positions buffer
+        const earthRadiusKm = 6371;
+        const scaleFactor = 1 / earthRadiusKm;
+
+        const i3 = index * 3;
+        positionsBuffer[i3] = satelliteData.k2State[0] * scaleFactor;
+        positionsBuffer[i3 + 1] = satelliteData.k2State[1] * scaleFactor;
+        positionsBuffer[i3 + 2] = satelliteData.k2State[2] * scaleFactor;
+
+        return true;
     } catch (error) {
-        // Fallback to default state
-        satelliteData.k2State = [7000, 0, 0, 0, 7.5, 0]; // Default LEO orbit
+        console.warn('K2 propagation failed:', error);
     }
+    return false;
 }
 
-function applyK2Propagation(satelliteData: SatelliteData, dt: number): void {
+// Helper functions for K2 propagation
+function initializeK2State(satelliteData: any, time: Date): void {
+    const positionAndVelocity = satellite.propagate(satelliteData.satrec, time);
+
+    if (positionAndVelocity?.position && positionAndVelocity?.velocity) {
+        const pos = positionAndVelocity.position;
+        const vel = positionAndVelocity.velocity;
+
+        // Store in km units for K2 propagation
+        satelliteData.k2State[0] = pos.x;
+        satelliteData.k2State[1] = pos.y;
+        satelliteData.k2State[2] = pos.z;
+        satelliteData.k2State[3] = vel.x;
+        satelliteData.k2State[4] = vel.y;
+        satelliteData.k2State[5] = vel.z;
+    }
+
+}
+
+function applyK2Propagation(satelliteData: any, dt: number): void {
     const MU_EARTH = 3.986004418e5; // Earth's gravitational parameter in km³/s²
     const halfDT = dt * 0.5;
 
@@ -168,69 +199,6 @@ function applyK2Propagation(satelliteData: SatelliteData, dt: number): void {
     satelliteData.k2State[2] += dt * satelliteData.k2State[5];
 }
 
-// Process a batch of satellites with direct shared memory access
-function processBatch(batch: PropagationBatch): void {
-    if (!sharedMemory) {
-        console.error('Shared memory not initialized');
-        return;
-    }
-
-    const { batchIndex, startIndex, batchSize, time } = batch;
-    const timeDate = new Date(time);
-
-    let successCount = 0;
-
-    // Process each satellite in the batch with direct memory access
-    for (let i = 0; i < batchSize; i++) {
-        const globalIndex = startIndex + i;
-        const satelliteData = sharedMemory.satelliteData[globalIndex];
-
-        if (!satelliteData) continue;
-
-        // Skip update if time hasn't changed significantly
-        if (satelliteData.lastUpdateTime && Math.abs(time - satelliteData.lastUpdateTime) < 50) {
-            continue;
-        }
-
-        let propagationSuccess = false;
-
-        // Direct propagation based on method - directly modifies shared memory
-        if (satelliteData.propagationMethod === "k2") {
-            propagationSuccess = propagateK2Shared(satelliteData, timeDate, globalIndex);
-        } else {
-            propagationSuccess = propagateSatelliteJsShared(satelliteData, timeDate, globalIndex);
-        }
-
-        if (propagationSuccess) {
-            // Update color, visibility, and size directly in shared memory
-            const i3 = globalIndex * 3;
-
-            // Update color
-            const tempColor = new THREE.Color(satelliteData.color);
-            sharedMemory.colors[i3] = tempColor.r;
-            sharedMemory.colors[i3 + 1] = tempColor.g;
-            sharedMemory.colors[i3 + 2] = tempColor.b;
-
-            // Update visibility
-            sharedMemory.visibility[globalIndex] = satelliteData.isVisible ? 1 : 0;
-
-            // Update size
-            sharedMemory.sizes[globalIndex] = satelliteData.size;
-
-            // Update last update time
-            satelliteData.lastUpdateTime = time;
-
-            successCount++;
-        }
-    }
-
-    // Notify completion
-    self.postMessage({
-        type: 'BATCH_COMPLETE',
-        data: { batchIndex, successCount }
-    });
-}
-
 // Handle messages from main thread
 self.onmessage = function (event: MessageEvent<WorkerMessage>) {
     const { type, data } = event.data;
@@ -241,26 +209,36 @@ self.onmessage = function (event: MessageEvent<WorkerMessage>) {
             self.postMessage({ type: 'INITIALIZED' });
             break;
 
-        case 'SET_SHARED_MEMORY':
-            setSharedMemory(data as SharedMemoryLayout);
-            self.postMessage({ type: 'SHARED_MEMORY_SET' });
-            break;
-
-        case 'PROPAGATE_BATCH':
+        case 'SET_SHARED_BUFFER':
             if (!isInitialized) {
                 console.error('Worker not initialized');
                 return;
             }
 
-            if (!sharedMemory) {
-                console.error('Shared memory not set');
+            try {
+                const { sharedBuffer, maxSatellites } = data;
+                setSharedBuffer(sharedBuffer, maxSatellites);
+                self.postMessage({ type: 'RING_BUFFER_READY' });
+            } catch (error) {
+                console.error('Error setting up shared buffer:', error);
+                self.postMessage({
+                    type: 'PROPAGATION_ERROR',
+                    data: { error: error instanceof Error ? error.message : 'Unknown error' }
+                });
+            }
+            break;
+
+        case 'PROCESS_SATELLITES':
+            if (!isInitialized || !controlBuffer) {
+                console.error('Worker not properly initialized for satellite processing');
                 return;
             }
 
             try {
-                processBatch(data as PropagationBatch);
+                const { satellites, startIndex, time } = data;
+                processSatellitesWithRingBuffer(satellites, startIndex, time);
             } catch (error) {
-                console.error('Error processing batch:', error);
+                console.error('Error processing satellites:', error);
                 self.postMessage({
                     type: 'PROPAGATION_ERROR',
                     data: { error: error instanceof Error ? error.message : 'Unknown error' }
@@ -273,5 +251,57 @@ self.onmessage = function (event: MessageEvent<WorkerMessage>) {
     }
 };
 
-// Import THREE.js for color handling
-import * as THREE from "three";
+// Process satellites with ring buffer (hybrid approach)
+function processSatellitesWithRingBuffer(satellites: any[], startIndex: number, time: number): void {
+    if (!controlBuffer || !positionsBuffer || !colorsBuffer || !visibilityBuffer || !sizesBuffer) return;
+
+    console.log(`Processing ${satellites.length} satellites with ring buffer`);
+
+    try {
+        let successCount = 0;
+        const timeDate = new Date(time);
+
+        // Process each satellite
+        for (let i = 0; i < satellites.length; i++) {
+            const globalIndex = startIndex + i;
+            const satelliteData = satellites[i];
+
+            if (globalIndex >= maxSatellites) break;
+
+            // Skip update if time hasn't changed significantly
+            if (satelliteData.lastUpdateTime && Math.abs(time - satelliteData.lastUpdateTime) < 50) {
+                continue;
+            }
+
+            let propagationSuccess = false;
+
+            // Direct propagation based on method
+            if (satelliteData.propagationMethod === "k2") {
+                propagationSuccess = propagateK2RingBuffer(satelliteData, timeDate, globalIndex);
+            } else {
+                propagationSuccess = propagateSatelliteJsRingBuffer(satelliteData, timeDate, globalIndex);
+            }
+
+            if (propagationSuccess) {
+                // Update last update time
+                satelliteData.lastUpdateTime = time;
+                successCount++;
+            }
+        }
+
+        // Update success count atomically
+        Atomics.store(controlBuffer, 7, successCount);
+
+        // Mark as complete
+        Atomics.store(controlBuffer, 3, 2); // Worker status = complete
+
+        console.log(`Ring buffer processing complete: ${successCount} satellites updated`);
+
+    } catch (error) {
+        console.error('Error in ring buffer satellite processing:', error);
+        Atomics.store(controlBuffer, 4, 1); // Error flag = 1
+        Atomics.store(controlBuffer, 3, -1); // Worker status = error
+    }
+}
+
+// Ring buffer approach - no transferable objects needed

@@ -236,7 +236,7 @@ export class GlobeEngine {
             this.globe = new THREE.Mesh(geometry, material);
             this.globe.receiveShadow = true;
             this.globe.castShadow = true;
-            // this.scene.add(this.globe);
+            this.scene.add(this.globe);
         }
     }
 
@@ -1120,6 +1120,20 @@ export class GlobeEngine {
      */
     public setDefaultPropagationMethod(method: "satellite.js" | "k2"): void {
         this.entityManager.setDefaultPropagationMethod(method);
+    }
+
+    /**
+     * Enable or disable web workers for satellite propagation
+     */
+    public setWebWorkersEnabled(enabled: boolean): void {
+        this.entityManager.setWebWorkersEnabled(enabled);
+    }
+
+    /**
+     * Check if web workers are enabled
+     */
+    public getWebWorkersEnabled(): boolean {
+        return this.entityManager.getWebWorkersEnabled();
     }
 
     public getAvailableTileProviders(): { value: TileProvider; label: string; description: string }[] {

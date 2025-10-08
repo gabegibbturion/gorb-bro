@@ -180,8 +180,8 @@ async function loadSatelliteData() {
   const mockSatellites = generateMockSatellites(1000);
 
   allSatState = mockSatellites.map((sat) => sat.state);
-  allSatColorIn = mockSatellites.map(() => [0.458431, 0.0, 0.025]); // #750006
-  allSatColorOut = mockSatellites.map(() => [1.0, 0.573, 0.282]); // #ff9248
+  allSatColorIn = mockSatellites.map(() => [1.0, 1.0, 1.0]); // white
+  allSatColorOut = mockSatellites.map(() => [1.0, 1.0, 1.0]); // white
   allSatPeriods = mockSatellites.map((sat) => sat.period);
   satNames = mockSatellites.map((sat) => sat.name);
   satN = mockSatellites.length;
