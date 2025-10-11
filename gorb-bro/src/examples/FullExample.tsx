@@ -13,14 +13,14 @@ import {
     SelectionSystem,
     createSolarSystem,
     ComponentType,
-    OrbitalFormat,
     type EntityId,
     InstancedSatelliteSystem,
+    createRSOBatch,
+    OrbitVisualizer,
 } from "../engine";
 
-// Import celestial update system and propagators
+// Import celestial update system
 import { CelestialUpdateSystem } from "../engine/systems/CelestialUpdateSystem";
-import { HybridK2SGP4Propagator } from "../engine/propagators/HybridK2SGP4Propagator";
 import { TLELoader } from "../engine/utils/TLELoader";
 
 // Import TLE file
@@ -33,6 +33,7 @@ function FullExample() {
     const celestialSystemRef = useRef<CelestialUpdateSystem | null>(null);
     const satelliteEntitiesRef = useRef<EntityId[]>([]);
     const statsRef = useRef<Stats | null>(null);
+    const orbitVisualizerRef = useRef<OrbitVisualizer | null>(null);
 
     // UI state that triggers re-renders (only when actually changed)
     const [entityCount, setEntityCount] = useState(0);
@@ -173,7 +174,6 @@ function FullExample() {
             if (earthMesh) {
                 (earthMesh.material as THREE.Material).transparent = true;
                 (earthMesh.material as THREE.Material).opacity = 0.3;
-                console.log("[DEBUG] Made Earth transparent (opacity 0.3)");
             }
 
             // Initial counts
@@ -184,10 +184,29 @@ function FullExample() {
             // Setup Selection Listener
             // ====================================================================
 
+            // Initialize orbit visualizer
+            const scene = renderingService.getScene();
+            const orbitVisualizer = new OrbitVisualizer({
+                color: 0x00ff00,
+                opacity: 0.5,
+                segments: 128,
+            });
+            orbitVisualizerRef.current = orbitVisualizer;
+
             const selectionService = engine.getService("selection");
             if (selectionService && "onSelectionChange" in selectionService) {
                 (selectionService as any).onSelectionChange((entityId: EntityId | null) => {
                     setSelectedEntity(entityId);
+
+                    // Update orbit visualization
+                    if (entityId !== null) {
+                        const orbitalElements = engine.getComponent(entityId, ComponentType.ORBITAL_ELEMENTS);
+                        if (orbitalElements && "format" in orbitalElements) {
+                            orbitVisualizer.createOrbit(orbitalElements as any, scene);
+                        }
+                    } else {
+                        orbitVisualizer.removeOrbit();
+                    }
                 });
             }
 
@@ -310,6 +329,9 @@ function FullExample() {
                 if (statsRef.current) {
                     document.body.removeChild(statsRef.current.dom);
                 }
+                if (orbitVisualizerRef.current) {
+                    orbitVisualizerRef.current.removeOrbit();
+                }
                 earth.object.destroy();
                 sun.object.destroy();
                 moon.object.destroy();
@@ -358,53 +380,19 @@ function FullExample() {
         try {
             // Parse TLE data
             const tles = TLELoader.parseTLEText(gpText);
-            console.log(`Loaded ${tles.length} TLEs from gp.txt`);
 
             // Limit to requested count or all
             const tlesToLoad = count ? tles.slice(0, count) : tles;
 
-            // Calculate stagger offset per satellite
-            const baseStaggerInterval = 1000; // Base 1 second stagger
-            const staggerPerSat = baseStaggerInterval / Math.max(tlesToLoad.length / 100, 1);
+            // Create satellites using RSO factory (much simpler!)
+            const entities = createRSOBatch(engine, tlesToLoad, {
+                color: 0x00ff00,
+                size: 50,
+                sgp4UpdateInterval: 60000,
+                useK2: true,
+            });
 
-            // Create satellites with staggered propagators
-            for (let i = 0; i < tlesToLoad.length; i++) {
-                const tle = tlesToLoad[i];
-                const entity = engine.createEntity();
-
-                // Add orbital elements
-                engine.addComponent(entity, {
-                    type: ComponentType.ORBITAL_ELEMENTS,
-                    format: OrbitalFormat.TLE,
-                    data: TLELoader.toTLE(tle),
-                    epoch: Date.now(),
-                });
-
-                // Add Hybrid K2/SGP4 propagator with staggered updates
-                const staggerOffset = (i * staggerPerSat) % baseStaggerInterval;
-                engine.addComponent(entity, {
-                    type: ComponentType.PROPAGATOR,
-                    propagator: new HybridK2SGP4Propagator(TLELoader.toTLE(tle), {
-                        sgp4UpdateInterval: 60000, // SGP4 update every 60 seconds
-                        staggerOffset: staggerOffset,
-                        timeJumpThreshold: 1000, // Force SGP4 for jumps >1000 seconds
-                        useK2: true, // Enable K2 for intermediate steps
-                    }),
-                });
-
-                // Add billboard for rendering
-                engine.addComponent(entity, {
-                    type: ComponentType.BILLBOARD,
-                    size: 50,
-                    color: 0x00ff00,
-                    sizeAttenuation: true,
-                });
-
-                satelliteEntitiesRef.current.push(entity);
-            }
-
-            console.log(`Created ${tlesToLoad.length} satellite entities with hybrid K2/SGP4 propagation`);
-            console.log(`Stagger range: 0-${baseStaggerInterval}ms, per satellite: ${staggerPerSat.toFixed(2)}ms`);
+            satelliteEntitiesRef.current.push(...entities);
             setSatelliteCount(satelliteEntitiesRef.current.length);
         } catch (error) {
             console.error("Failed to load satellites:", error);

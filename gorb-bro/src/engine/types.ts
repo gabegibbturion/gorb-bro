@@ -316,12 +316,14 @@ export interface IEngine {
     // Entity management
     createEntity(): EntityId;
     destroyEntity(entity: EntityId): void;
+    getEntityCount(): number;
 
     // Component management
     addComponent(entity: EntityId, component: Component): void;
     removeComponent(entity: EntityId, componentType: ComponentType): void;
     getComponent<T extends Component>(entity: EntityId, type: ComponentType): T | undefined;
     hasComponent(entity: EntityId, componentType: ComponentType): boolean;
+    getEntitiesWithComponent(componentType: ComponentType): EntityId[];
 
     // System management
     addSystem(system: System): void;

@@ -1,7 +1,7 @@
 // System for handling entity selection via raycasting and rendering selection boxes
 
 import * as THREE from "three";
-import type { System, EntityId, IEngine, PositionComponent } from "../types";
+import type { System, EntityId, IEngine } from "../types";
 import { ComponentType } from "../types";
 import type { RenderingService } from "../services/RenderingService";
 import type { SelectionService } from "../services/SelectionService";
@@ -76,7 +76,15 @@ export class SelectionSystem implements System {
         const camera = this.renderingService.getCamera();
         this.raycaster.setFromCamera(this.mouse, camera);
 
-        // Get all objects in the scene
+        // First try manual raycasting for instanced satellites (more reliable)
+        const selectedSatellite = this.manualRaycastSatellites();
+        if (selectedSatellite !== null) {
+            this.logEntityClick(selectedSatellite);
+            this.selectionService.selectEntity(selectedSatellite);
+            return;
+        }
+
+        // Fall back to regular raycasting for other objects (Earth, Sun, Moon)
         const scene = this.renderingService.getScene();
         const intersects = this.raycaster.intersectObjects(scene.children, true);
 
@@ -116,31 +124,84 @@ export class SelectionSystem implements System {
         }
 
         // No entity clicked, deselect
-        console.log(`❌ Clicked empty space - deselecting`);
         this.selectionService.deselectEntity();
     }
 
     /**
-     * Log entity click information
+     * Manual raycasting for instanced satellites
+     * Three.js raycaster doesn't handle instanced meshes well, so we do it manually
      */
-    private logEntityClick(entityId: EntityId): void {
-        console.log(`🎯 Entity clicked: ${entityId}`);
+    private manualRaycastSatellites(): EntityId | null {
+        if (!this.engine) return null;
 
-        if (this.engine) {
-            const position = this.engine.getComponent<PositionComponent>(entityId, ComponentType.POSITION);
-            const mesh = this.engine.getComponent(entityId, ComponentType.MESH);
-            const billboard = this.engine.getComponent(entityId, ComponentType.BILLBOARD);
+        // Get the InstancedSatelliteSystem
+        const instancedSatelliteSystem = this.engine.getSystem("instancedSatellite");
+        if (!instancedSatelliteSystem || !("getPositionArray" in instancedSatelliteSystem)) {
+            return null;
+        }
 
-            console.log(`   Components:`, {
-                hasPosition: !!position,
-                hasMesh: !!mesh,
-                hasBillboard: !!billboard,
-            });
+        // Get all entities with billboards (satellites)
+        const satelliteEntities = this.engine.getEntitiesWithComponent(ComponentType.BILLBOARD);
+        if (satelliteEntities.length === 0) {
+            return null;
+        }
 
-            if (position) {
-                console.log(`   Position: [${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}]`);
+        // Get position array and entity-to-index mapping
+        const positions = (instancedSatelliteSystem as any).getPositionArray() as Float32Array;
+        const getEntityIndex = (instancedSatelliteSystem as any).getEntityIndex.bind(instancedSatelliteSystem) as (entity: EntityId) => number | undefined;
+
+        // Manual raycasting for each satellite
+        let closestEntity: EntityId | null = null;
+        let closestDistance = Infinity;
+        const selectionThreshold = 300; // 300 km threshold (adjust based on satellite size)
+
+        const rayOrigin = this.raycaster.ray.origin;
+        const rayDirection = this.raycaster.ray.direction;
+
+        for (const entity of satelliteEntities) {
+            const index = getEntityIndex(entity);
+            if (index === undefined) continue;
+
+            const i3 = index * 3;
+            const satellitePosition = new THREE.Vector3(
+                positions[i3],
+                positions[i3 + 1],
+                positions[i3 + 2]
+            );
+
+            // Skip hidden/invalid positions
+            if (satellitePosition.length() > 9000) continue;
+
+            // Vector from ray origin to satellite
+            const toSatellite = satellitePosition.clone().sub(rayOrigin);
+
+            // Project toSatellite onto ray direction
+            const projectionLength = toSatellite.dot(rayDirection);
+
+            // Only consider satellites in front of the camera
+            if (projectionLength <= 0) continue;
+
+            // Closest point on ray to satellite
+            const closestPointOnRay = rayOrigin.clone().add(rayDirection.clone().multiplyScalar(projectionLength));
+
+            // Distance from satellite to closest point on ray (in km, since positions are in km)
+            const distanceToRay = satellitePosition.distanceTo(closestPointOnRay);
+
+            // Check if within threshold and closer than previous best
+            if (distanceToRay < selectionThreshold && distanceToRay < closestDistance) {
+                closestDistance = distanceToRay;
+                closestEntity = entity;
             }
         }
+
+        return closestEntity;
+    }
+
+    /**
+     * Log entity click information (now silent)
+     */
+    private logEntityClick(_entityId: EntityId): void {
+        // Silently select entity without logging
     }
 
     /**
@@ -221,3 +282,4 @@ export class SelectionSystem implements System {
         this.selectionService = null;
     }
 }
+

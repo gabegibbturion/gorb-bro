@@ -62,7 +62,6 @@ export class InstancedSatelliteSystem implements System {
     }
 
     init(engine: IEngine): void {
-        console.log("[InstancedSatelliteSystem] Initializing...");
         this.engine = engine;
         this.renderingService = engine.getService<RenderingService>("rendering") ?? null;
 
@@ -73,7 +72,6 @@ export class InstancedSatelliteSystem implements System {
 
         // Create the instanced mesh
         this.createInstancedMesh();
-        console.log("[InstancedSatelliteSystem] ✅ Initialized with mesh");
     }
 
     private createInstancedMesh(): void {
@@ -181,11 +179,12 @@ export class InstancedSatelliteSystem implements System {
         // Create mesh
         this.instancedMesh = new THREE.Mesh(this.satelliteGeometry, this.satelliteMaterial);
 
+        // Store the index-to-entity mapping on the mesh for raycasting
+        this.instancedMesh.userData.instanceToEntityMap = this.indexToEntity;
+
         // Add to scene
         const scene = this.renderingService.getScene();
         scene.add(this.instancedMesh);
-
-        console.log(`InstancedSatelliteSystem created with capacity for ${this.maxSatellites} satellites`);
     }
 
     private getOrAllocateIndex(entity: EntityId): number {
@@ -305,11 +304,6 @@ export class InstancedSatelliteSystem implements System {
 
         const startTime = performance.now();
 
-        // Log first time we get entities
-        if (entities.length > 0 && this.entityToIndex.size === 0) {
-            console.log("[InstancedSatelliteSystem] 📊 Processing first entities:", entities.length);
-        }
-
         // Register new entities and update colors/sizes from billboard components
         for (const entity of entities) {
             const billboard = this.engine.getComponent<BillboardComponent>(entity, ComponentType.BILLBOARD);
@@ -366,22 +360,6 @@ export class InstancedSatelliteSystem implements System {
             const firstEntity = entities[0];
             const firstIndex = this.entityToIndex.get(firstEntity);
             if (firstIndex !== undefined) {
-                const i3 = firstIndex * 3;
-                const pos = [this.positions[i3], this.positions[i3 + 1], this.positions[i3 + 2]];
-                const col = [this.colors[i3], this.colors[i3 + 1], this.colors[i3 + 2]];
-                const size = this.sizes[firstIndex];
-
-                // Log every 60 frames (1 second at 60fps)
-                if (Math.random() < 0.016) {
-                    console.log(`[InstancedSatelliteSystem] Sample satellite:`, {
-                        entity: firstEntity,
-                        index: firstIndex,
-                        position: `[${pos[0].toFixed(3)}, ${pos[1].toFixed(3)}, ${pos[2].toFixed(3)}]`,
-                        color: `[${col[0].toFixed(3)}, ${col[1].toFixed(3)}, ${col[2].toFixed(3)}]`,
-                        size: size,
-                        totalSatellites: this.entityToIndex.size,
-                    });
-                }
             }
         }
 

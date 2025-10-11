@@ -39,4 +39,8 @@ export { HybridK2SGP4Propagator, type HybridK2SGP4Config } from "./propagators/H
 
 // Utilities
 export { TLELoader } from "./utils/TLELoader";
+export { OrbitVisualizer, type OrbitVisualizerOptions } from "./utils/OrbitVisualizer";
 export * from "./utils/OrbitalMath";
+
+// RSO Factory
+export { createRSO, createRSOBatch, type RSOConfig } from "./factories/RSOFactory";

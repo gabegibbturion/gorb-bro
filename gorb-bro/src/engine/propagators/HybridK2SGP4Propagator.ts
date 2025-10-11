@@ -243,15 +243,6 @@ export class HybridK2SGP4Propagator implements IPropagator {
         positionArray[i3 + 1] = y;
         positionArray[i3 + 2] = z;
 
-        // Debug: Log first propagation
-        if (index === 0 && Math.random() < 0.01) {
-            console.log(`[HybridK2SGP4] Propagated to index ${index}:`, {
-                position: `[${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}] km`,
-                usedSGP4: useSGP4,
-                time: new Date(time).toISOString(),
-            });
-        }
-
         this.lastPropagationTime = time;
         return true;
     }

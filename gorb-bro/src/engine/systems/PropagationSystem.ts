@@ -37,11 +37,6 @@ export class PropagationSystem implements System {
         const startTime = performance.now();
         const currentTime = this.timeService.getCurrentTime();
 
-        // Log first propagation
-        if (entities.length > 0 && this.propagationTime === 0) {
-            console.log("[PropagationSystem] 🚀 Starting propagation for", entities.length, "entities");
-        }
-
         for (const entity of entities) {
             const orbital = this.engine.getComponent<OrbitalElementsComponent>(entity, ComponentType.ORBITAL_ELEMENTS);
             const propagator = this.engine.getComponent<PropagatorComponent>(entity, ComponentType.PROPAGATOR);

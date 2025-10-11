@@ -109,6 +109,10 @@ export class Engine implements IEngine {
         return this.componentRegistry.hasComponent(entity, componentType);
     }
 
+    getEntitiesWithComponent(componentType: ComponentType): EntityId[] {
+        return this.componentRegistry.getEntitiesWithComponent(componentType);
+    }
+
     // System management
     addSystem(system: System): void {
         this.systemManager.add(system);
