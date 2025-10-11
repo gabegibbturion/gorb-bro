@@ -8,6 +8,7 @@ import { SystemManager } from "./SystemManager";
 import { TimeService } from "./services/TimeService";
 import { QueryService } from "./services/QueryService";
 import { SelectionServiceImpl } from "./services/SelectionService";
+import { PositionBufferService } from "./services/PositionBufferService";
 
 export class Engine implements IEngine {
     private entityManager: EntityManager;
@@ -52,6 +53,10 @@ export class Engine implements IEngine {
         // Selection service (always created)
         const selectionService = new SelectionServiceImpl();
         this.services.set("selection", selectionService as Service);
+
+        // Position buffer service for performance
+        const positionBuffer = new PositionBufferService(config.maxEntities || 100000);
+        this.services.set("positionBuffer", positionBuffer as Service);
 
         // Rendering service (if provided)
         if (services.rendering) {
@@ -111,6 +116,10 @@ export class Engine implements IEngine {
 
     removeSystem(systemName: string): void {
         this.systemManager.remove(systemName);
+    }
+
+    getSystem(systemName: string): System | undefined {
+        return this.systemManager.get(systemName);
     }
 
     // Main update loop

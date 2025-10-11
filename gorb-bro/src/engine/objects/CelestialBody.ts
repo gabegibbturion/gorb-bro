@@ -46,6 +46,9 @@ export abstract class CelestialBody {
         // Create mesh
         this.mesh = new THREE.Mesh(geometry, material);
 
+        // Store entity ID in userData for selection
+        this.mesh.userData.entityId = this.entity;
+
         // Register with rendering service
         const renderingService = engine.getService("rendering");
         if (renderingService && "addObject" in renderingService) {

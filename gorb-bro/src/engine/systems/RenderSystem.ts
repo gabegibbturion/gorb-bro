@@ -18,6 +18,7 @@ export class RenderSystem implements System {
     private renderObjects: Map<EntityId, THREE.Object3D> = new Map();
     private billboardGeometry: THREE.BufferGeometry | null = null;
     private billboardMaterial: THREE.PointsMaterial | null = null;
+    public renderTime: number = 0; // Exposed for stats
 
     init(engine: IEngine): void {
         this.engine = engine;
@@ -42,6 +43,8 @@ export class RenderSystem implements System {
 
     update(_deltaTime: number, entities: EntityId[]): void {
         if (!this.engine || !this.renderingService) return;
+
+        const startTime = performance.now();
 
         for (const entity of entities) {
             const position = this.engine.getComponent<PositionComponent>(entity, ComponentType.POSITION);
@@ -70,6 +73,8 @@ export class RenderSystem implements System {
 
         // Remove render objects for entities that no longer exist
         this.cleanupRemovedEntities(entities);
+
+        this.renderTime = performance.now() - startTime;
     }
 
     private updateBillboard(entity: EntityId, position: PositionComponent, billboard: BillboardComponent): void {
@@ -86,6 +91,7 @@ export class RenderSystem implements System {
                 })
             );
             sprite.scale.set(billboard.size, billboard.size, 1);
+            sprite.userData.entityId = entity; // Store entity ID for selection
             object = sprite;
 
             this.renderObjects.set(entity, object);
@@ -113,6 +119,7 @@ export class RenderSystem implements System {
 
             const mesh = new THREE.Mesh(geometry, material);
             mesh.scale.set(...meshComponent.scale);
+            mesh.userData.entityId = entity; // Store entity ID for selection
             object = mesh;
 
             this.renderObjects.set(entity, object);

@@ -19,6 +19,7 @@ export class CelestialUpdateSystem implements System {
     private celestialBodies: CelestialBodies = {};
     private lastSunMoonUpdate: number = 0;
     private sunMoonUpdateInterval: number = 60000; // Update every minute
+    public celestialUpdateTime: number = 0; // Exposed for stats
 
     init(_engine: IEngine): void {
         // No initialization needed
@@ -39,6 +40,7 @@ export class CelestialUpdateSystem implements System {
     }
 
     update(deltaTime: number, _entities: EntityId[]): void {
+        const startTime = performance.now();
         const now = Date.now();
 
         // Update Earth rotation
@@ -58,6 +60,8 @@ export class CelestialUpdateSystem implements System {
 
             this.lastSunMoonUpdate = now;
         }
+
+        this.celestialUpdateTime = performance.now() - startTime;
     }
 
     cleanup(): void {

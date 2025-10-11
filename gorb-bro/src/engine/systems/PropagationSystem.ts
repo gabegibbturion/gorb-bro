@@ -3,6 +3,7 @@
 import type { System, EntityId, IEngine, OrbitalElementsComponent, PropagatorComponent, PositionComponent, VelocityComponent } from "../types";
 import { ComponentType } from "../types";
 import { TimeService } from "../services/TimeService";
+import type { PositionBufferService } from "../services/PositionBufferService";
 
 export class PropagationSystem implements System {
     name = "propagation";
@@ -12,15 +13,19 @@ export class PropagationSystem implements System {
 
     private engine: IEngine | null = null;
     private timeService: TimeService | null = null;
+    private positionBuffer: PositionBufferService | null = null;
+    public propagationTime: number = 0; // Exposed for stats
 
     init(engine: IEngine): void {
         this.engine = engine;
         this.timeService = engine.getService<TimeService>("time") || null;
+        this.positionBuffer = engine.getService<PositionBufferService>("positionBuffer") || null;
     }
 
     update(_deltaTime: number, entities: EntityId[]): void {
         if (!this.engine || !this.timeService) return;
 
+        const startTime = performance.now();
         const currentTime = this.timeService.getCurrentTime();
 
         for (const entity of entities) {
@@ -33,47 +38,63 @@ export class PropagationSystem implements System {
                 // Propagate to current time
                 const state = propagator.propagator.propagate(orbital.data, currentTime);
 
-                // Update or create position component
+                // Fast path: Write directly to position buffer if available
+                if (this.positionBuffer) {
+                    let bufferIndex = this.positionBuffer.getIndex(entity);
+                    if (bufferIndex === undefined) {
+                        bufferIndex = this.positionBuffer.registerEntity(entity);
+                    }
+                    this.positionBuffer.writePosition(bufferIndex, state.position.x, state.position.y, state.position.z);
+                }
+
+                // Also update position component for compatibility
                 const existingPos = this.engine.getComponent<PositionComponent>(entity, ComponentType.POSITION);
 
-                const posComponent: PositionComponent = {
-                    type: ComponentType.POSITION,
-                    x: state.position.x,
-                    y: state.position.y,
-                    z: state.position.z,
-                    frame: state.frame,
-                };
-
                 if (existingPos) {
-                    // Update existing
-                    Object.assign(existingPos, posComponent);
+                    // Update existing (fast)
+                    existingPos.x = state.position.x;
+                    existingPos.y = state.position.y;
+                    existingPos.z = state.position.z;
+                    existingPos.frame = state.frame;
                 } else {
                     // Add new
-                    this.engine.addComponent(entity, posComponent);
+                    this.engine.addComponent(entity, {
+                        type: ComponentType.POSITION,
+                        x: state.position.x,
+                        y: state.position.y,
+                        z: state.position.z,
+                        frame: state.frame,
+                    });
                 }
 
-                // Update or create velocity component
+                // Update velocity (less critical for rendering)
                 const existingVel = this.engine.getComponent<VelocityComponent>(entity, ComponentType.VELOCITY);
 
-                const velComponent: VelocityComponent = {
-                    type: ComponentType.VELOCITY,
-                    vx: state.velocity.vx,
-                    vy: state.velocity.vy,
-                    vz: state.velocity.vz,
-                    frame: state.frame,
-                };
-
                 if (existingVel) {
-                    // Update existing
-                    Object.assign(existingVel, velComponent);
+                    existingVel.vx = state.velocity.vx;
+                    existingVel.vy = state.velocity.vy;
+                    existingVel.vz = state.velocity.vz;
+                    existingVel.frame = state.frame;
                 } else {
-                    // Add new
-                    this.engine.addComponent(entity, velComponent);
+                    this.engine.addComponent(entity, {
+                        type: ComponentType.VELOCITY,
+                        vx: state.velocity.vx,
+                        vy: state.velocity.vy,
+                        vz: state.velocity.vz,
+                        frame: state.frame,
+                    });
                 }
             } catch (error) {
-                console.error(`Propagation error for entity ${entity}:`, error);
+                // Silently skip entities with propagation errors to avoid console spam
+                // Only log occasionally
+                if (Math.random() < 0.001) {
+                    // 0.1% chance
+                    console.warn(`Propagation error for entity ${entity}:`, error);
+                }
             }
         }
+
+        this.propagationTime = performance.now() - startTime;
     }
 
     cleanup(): void {

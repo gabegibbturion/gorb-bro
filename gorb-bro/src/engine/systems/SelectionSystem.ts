@@ -18,6 +18,7 @@ export class SelectionSystem implements System {
     private mouse: THREE.Vector2 = new THREE.Vector2();
     private selectionBox: THREE.BoxHelper | null = null;
     private entityMeshMap: Map<THREE.Object3D, EntityId> = new Map();
+    public selectionTime: number = 0; // Exposed for stats
 
     init(engine: IEngine): void {
         this.engine = engine;
@@ -84,29 +85,28 @@ export class SelectionSystem implements System {
             for (const intersect of intersects) {
                 let obj: THREE.Object3D | null = intersect.object;
 
+                // Check userData first (fast path for direct entity storage)
+                if (obj.userData && obj.userData.entityId !== undefined) {
+                    const entityId = obj.userData.entityId;
+                    this.logEntityClick(entityId);
+                    this.selectionService.selectEntity(entityId);
+                    return;
+                }
+
                 // Traverse up to find an object with an entity mapping
                 while (obj) {
+                    // Check userData
+                    if (obj.userData && obj.userData.entityId !== undefined) {
+                        const entityId = obj.userData.entityId;
+                        this.logEntityClick(entityId);
+                        this.selectionService.selectEntity(entityId);
+                        return;
+                    }
+
+                    // Check mesh map
                     const entityId = this.entityMeshMap.get(obj);
                     if (entityId !== undefined) {
-                        console.log(`🎯 Entity clicked: ${entityId}`);
-
-                        // Log entity components if engine is available
-                        if (this.engine) {
-                            const position = this.engine.getComponent<PositionComponent>(entityId, ComponentType.POSITION);
-                            const mesh = this.engine.getComponent(entityId, ComponentType.MESH);
-                            const billboard = this.engine.getComponent(entityId, ComponentType.BILLBOARD);
-
-                            console.log(`   Components:`, {
-                                hasPosition: !!position,
-                                hasMesh: !!mesh,
-                                hasBillboard: !!billboard,
-                            });
-
-                            if (position) {
-                                console.log(`   Position: [${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}]`);
-                            }
-                        }
-
+                        this.logEntityClick(entityId);
                         this.selectionService.selectEntity(entityId);
                         return;
                     }
@@ -118,6 +118,29 @@ export class SelectionSystem implements System {
         // No entity clicked, deselect
         console.log(`❌ Clicked empty space - deselecting`);
         this.selectionService.deselectEntity();
+    }
+
+    /**
+     * Log entity click information
+     */
+    private logEntityClick(entityId: EntityId): void {
+        console.log(`🎯 Entity clicked: ${entityId}`);
+
+        if (this.engine) {
+            const position = this.engine.getComponent<PositionComponent>(entityId, ComponentType.POSITION);
+            const mesh = this.engine.getComponent(entityId, ComponentType.MESH);
+            const billboard = this.engine.getComponent(entityId, ComponentType.BILLBOARD);
+
+            console.log(`   Components:`, {
+                hasPosition: !!position,
+                hasMesh: !!mesh,
+                hasBillboard: !!billboard,
+            });
+
+            if (position) {
+                console.log(`   Position: [${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}]`);
+            }
+        }
     }
 
     /**
@@ -164,13 +187,15 @@ export class SelectionSystem implements System {
 
             if (meshComponent && "mesh" in meshComponent && meshComponent.mesh) {
                 const mesh = meshComponent.mesh as THREE.Mesh;
-                this.selectionBox = new THREE.BoxHelper(mesh, 0x00ff00); // Green box
+                this.selectionBox = new THREE.BoxHelper(mesh, 0xff0000); // Red box
                 scene.add(this.selectionBox);
             }
         }
     }
 
     update(_deltaTime: number, entities: EntityId[]): void {
+        const startTime = performance.now();
+
         // Update entity-mesh mapping
         this.updateEntityMeshMap(entities);
 
@@ -178,6 +203,8 @@ export class SelectionSystem implements System {
         if (this.selectionBox) {
             this.selectionBox.update();
         }
+
+        this.selectionTime = performance.now() - startTime;
     }
 
     cleanup(): void {

@@ -13,6 +13,7 @@ export class TransformSystem implements System {
     private engine: IEngine | null = null;
     private transformCache: Map<EntityId, THREE.Matrix4> = new Map();
     private renderFrame: ReferenceFrame = ReferenceFrame.RENDER;
+    public transformTime: number = 0; // Exposed for stats
 
     init(engine: IEngine): void {
         this.engine = engine;
@@ -20,6 +21,8 @@ export class TransformSystem implements System {
 
     update(_deltaTime: number, entities: EntityId[]): void {
         if (!this.engine) return;
+
+        const startTime = performance.now();
 
         for (const entity of entities) {
             const position = this.engine.getComponent<PositionComponent>(entity, ComponentType.POSITION);
@@ -54,6 +57,8 @@ export class TransformSystem implements System {
                 this.engine.addComponent(entity, transformComponent);
             }
         }
+
+        this.transformTime = performance.now() - startTime;
     }
 
     private convertToRenderFrame(position: PositionComponent): {

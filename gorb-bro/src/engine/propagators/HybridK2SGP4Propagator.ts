@@ -110,6 +110,22 @@ export class HybridK2SGP4Propagator implements IPropagator {
         const positionAndVelocity = satellite.propagate(this.satrec, date);
 
         if (!positionAndVelocity || typeof positionAndVelocity === "boolean") {
+            // Try to use cached state if available
+            if (this.cachedState) {
+                return {
+                    position: {
+                        x: this.cachedState[0],
+                        y: this.cachedState[1],
+                        z: this.cachedState[2],
+                    },
+                    velocity: {
+                        vx: this.cachedState[3],
+                        vy: this.cachedState[4],
+                        vz: this.cachedState[5],
+                    },
+                    frame: ReferenceFrame.TEME,
+                };
+            }
             throw new Error("SGP4 propagation failed");
         }
 
@@ -117,6 +133,22 @@ export class HybridK2SGP4Propagator implements IPropagator {
         const velocity = positionAndVelocity.velocity;
 
         if (!position || !velocity || typeof position === "boolean" || typeof velocity === "boolean") {
+            // Try to use cached state if available
+            if (this.cachedState) {
+                return {
+                    position: {
+                        x: this.cachedState[0],
+                        y: this.cachedState[1],
+                        z: this.cachedState[2],
+                    },
+                    velocity: {
+                        vx: this.cachedState[3],
+                        vy: this.cachedState[4],
+                        vz: this.cachedState[5],
+                    },
+                    frame: ReferenceFrame.TEME,
+                };
+            }
             throw new Error("SGP4 propagation returned invalid state");
         }
 

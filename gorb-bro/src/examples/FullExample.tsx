@@ -47,6 +47,11 @@ function FullExample() {
     const simTimeDisplayRef = useRef<HTMLSpanElement>(null);
     const entityCountDisplayRef = useRef<HTMLSpanElement>(null);
     const satelliteCountDisplayRef = useRef<HTMLSpanElement>(null);
+    const celestialUpdateTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const propagationTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const transformTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const renderTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const selectionTimeDisplayRef = useRef<HTMLSpanElement>(null);
 
     useEffect(() => {
         if (!canvasRef.current) return;
@@ -109,7 +114,7 @@ function FullExample() {
             controlsRef.current = controls;
 
             // Add starfield
-            addStarfield(scene);
+            // addStarfield(scene);
 
             // ====================================================================
             // Setup Stats.js
@@ -183,6 +188,13 @@ function FullExample() {
                     controlsRef.current.update();
                 }
 
+                // Get system timing data
+                const celestialSystem = engine.getSystem("celestialUpdate") as CelestialUpdateSystem | undefined;
+                const propagationSystem = engine.getSystem("propagation") as PropagationSystem | undefined;
+                const transformSystem = engine.getSystem("transform") as TransformSystem | undefined;
+                const renderSystem = engine.getSystem("render") as RenderSystem | undefined;
+                const selectionSystem = engine.getSystem("selection") as SelectionSystem | undefined;
+
                 // Update display values directly (no re-render)
                 if (simTimeDisplayRef.current) {
                     simTimeDisplayRef.current.textContent = formatTime(timeService.getCurrentTime());
@@ -193,6 +205,21 @@ function FullExample() {
                 }
                 if (satelliteCountDisplayRef.current) {
                     satelliteCountDisplayRef.current.textContent = satelliteEntitiesRef.current.length.toString();
+                }
+                if (celestialUpdateTimeDisplayRef.current && celestialSystem) {
+                    celestialUpdateTimeDisplayRef.current.textContent = celestialSystem.celestialUpdateTime.toFixed(2);
+                }
+                if (propagationTimeDisplayRef.current && propagationSystem) {
+                    propagationTimeDisplayRef.current.textContent = propagationSystem.propagationTime.toFixed(2);
+                }
+                if (transformTimeDisplayRef.current && transformSystem) {
+                    transformTimeDisplayRef.current.textContent = transformSystem.transformTime.toFixed(2);
+                }
+                if (renderTimeDisplayRef.current && renderSystem) {
+                    renderTimeDisplayRef.current.textContent = renderSystem.renderTime.toFixed(2);
+                }
+                if (selectionTimeDisplayRef.current && selectionSystem) {
+                    selectionTimeDisplayRef.current.textContent = selectionSystem.selectionTime.toFixed(2);
                 }
 
                 // Note: isPaused state is now managed by togglePause button directly
@@ -390,8 +417,32 @@ function FullExample() {
                     <div style={{ marginBottom: "8px", color: selectedEntity !== null ? "#ffff00" : undefined }}>
                         <strong>Selected:</strong> {selectedEntity !== null ? `Entity ${selectedEntity}` : "None"}
                     </div>
-                    <div style={{ fontSize: "12px", opacity: 0.7 }}>
+                    <div style={{ fontSize: "12px", opacity: 0.7, marginBottom: "8px" }}>
                         <strong>Status:</strong> {isPaused ? "⏸ Paused" : "▶ Running"}
+                    </div>
+                </div>
+
+                {/* Performance Stats - System Timings */}
+                <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #333" }}>
+                    <div style={{ marginBottom: "10px", color: "#ffaa00" }}>
+                        <strong>⚡ System Timing (ms/frame)</strong>
+                    </div>
+                    <div style={{ fontSize: "11px" }}>
+                        <div style={{ marginBottom: "3px" }}>
+                            <strong>Celestial:</strong> <span ref={celestialUpdateTimeDisplayRef}>0.00</span> ms
+                        </div>
+                        <div style={{ marginBottom: "3px" }}>
+                            <strong>Propagation:</strong> <span ref={propagationTimeDisplayRef}>0.00</span> ms
+                        </div>
+                        <div style={{ marginBottom: "3px" }}>
+                            <strong>Transform:</strong> <span ref={transformTimeDisplayRef}>0.00</span> ms
+                        </div>
+                        <div style={{ marginBottom: "3px" }}>
+                            <strong>Render:</strong> <span ref={renderTimeDisplayRef}>0.00</span> ms
+                        </div>
+                        <div style={{ marginBottom: "3px" }}>
+                            <strong>Selection:</strong> <span ref={selectionTimeDisplayRef}>0.00</span> ms
+                        </div>
                     </div>
                 </div>
 
@@ -606,7 +657,7 @@ function FullExample() {
                 </button>
             )}
 
-            {/* Legend */}
+            {/* Legend & Selected Entity Info */}
             <div
                 style={{
                     position: "absolute",
@@ -619,6 +670,7 @@ function FullExample() {
                     fontFamily: "monospace",
                     fontSize: "12px",
                     border: "1px solid #333",
+                    maxWidth: "280px",
                 }}
             >
                 <h3 style={{ margin: "0 0 10px 0", fontSize: "14px" }}>Legend</h3>
@@ -638,6 +690,53 @@ function FullExample() {
                     <div style={{ width: "15px", height: "15px", background: "#00ff00", marginRight: "8px", borderRadius: "50%" }}></div>
                     <span>Satellites</span>
                 </div>
+
+                {/* Selected Entity Info */}
+                {selectedEntity !== null && (
+                    <>
+                        <div style={{ borderTop: "1px solid #333", marginTop: "15px", paddingTop: "15px" }}>
+                            <h3 style={{ margin: "0 0 10px 0", fontSize: "14px", color: "#ff0000" }}>🎯 Selected Entity</h3>
+                            <div style={{ fontSize: "11px", lineHeight: "1.6" }}>
+                                <div style={{ marginBottom: "5px" }}>
+                                    <strong>Entity ID:</strong> {selectedEntity}
+                                </div>
+                                {(() => {
+                                    const engine = engineRef.current;
+                                    if (!engine) return null;
+
+                                    const position = engine.getComponent(selectedEntity, ComponentType.POSITION);
+                                    const orbital = engine.getComponent(selectedEntity, ComponentType.ORBITAL_ELEMENTS);
+                                    const mesh = engine.getComponent(selectedEntity, ComponentType.MESH);
+                                    const billboard = engine.getComponent(selectedEntity, ComponentType.BILLBOARD);
+
+                                    return (
+                                        <>
+                                            <div style={{ marginBottom: "5px" }}>
+                                                <strong>Components:</strong>
+                                            </div>
+                                            <div style={{ paddingLeft: "10px", fontSize: "10px" }}>
+                                                {position && <div>✓ Position</div>}
+                                                {orbital && <div>✓ Orbital Elements</div>}
+                                                {mesh && <div>✓ Mesh</div>}
+                                                {billboard && <div>✓ Billboard</div>}
+                                            </div>
+                                            {position && "x" in position && (
+                                                <div style={{ marginTop: "5px" }}>
+                                                    <strong>Position (km):</strong>
+                                                    <div style={{ paddingLeft: "10px", fontSize: "10px" }}>
+                                                        <div>X: {position.x.toFixed(2)}</div>
+                                                        <div>Y: {position.y.toFixed(2)}</div>
+                                                        <div>Z: {position.z.toFixed(2)}</div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
         </div>
     );
