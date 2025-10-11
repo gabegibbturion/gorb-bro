@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@types/stats.js':
+        specifier: ^0.17.4
+        version: 0.17.4
       '@types/three':
         specifier: ^0.180.0
         version: 0.180.0
@@ -20,6 +23,9 @@ importers:
       satellite.js:
         specifier: ^6.0.1
         version: 6.0.1
+      stats.js:
+        specifier: ^0.17.0
+        version: 0.17.0
       suncalc:
         specifier: ^1.9.0
         version: 1.9.0
@@ -974,6 +980,9 @@ packages:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
+  stats.js@0.17.0:
+    resolution: {integrity: sha512-hNKz8phvYLPEcRkeG1rsGmV5ChMjKDAWU7/OJJdDErPBNChQXxCo3WZurGpnWc6gZhAzEPFad1aVgyOANH1sMw==}
+
   strip-json-comments@3.1.1:
     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
     engines: {node: '>=8'}
@@ -1885,6 +1894,8 @@ snapshots:
   shebang-regex@3.0.0: {}
 
   source-map-js@1.2.1: {}
+
+  stats.js@0.17.0: {}
 
   strip-json-comments@3.1.1: {}
 

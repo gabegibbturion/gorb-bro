@@ -7,13 +7,15 @@ import { ComponentRegistry } from "./ComponentRegistry";
 import { SystemManager } from "./SystemManager";
 import { TimeService } from "./services/TimeService";
 import { QueryService } from "./services/QueryService";
+import { SelectionServiceImpl } from "./services/SelectionService";
 
 export class Engine implements IEngine {
     private entityManager: EntityManager;
     private componentRegistry: ComponentRegistry;
     private systemManager: SystemManager;
     private services: Map<string, Service> = new Map();
-    private isRunning: boolean = false;
+    private isRunning: boolean = false; // Animation loop active
+    private isPausedState: boolean = false; // Simulation paused (but still rendering)
     private animationFrameId: number | null = null;
     private lastTime: number = 0;
 
@@ -46,6 +48,10 @@ export class Engine implements IEngine {
         const queryService = services.query || new QueryService();
         queryService.setComponentRegistry(this.componentRegistry);
         this.services.set("query", queryService as Service);
+
+        // Selection service (always created)
+        const selectionService = new SelectionServiceImpl();
+        this.services.set("selection", selectionService as Service);
 
         // Rendering service (if provided)
         if (services.rendering) {
@@ -128,6 +134,25 @@ export class Engine implements IEngine {
         return this.services.get(name) as T | undefined;
     }
 
+    // ====================================================================
+    // Selection Management
+    // ====================================================================
+
+    getSelectedEntity(): EntityId | null {
+        const selectionService = this.services.get("selection") as SelectionServiceImpl | undefined;
+        return selectionService?.getSelectedEntity() ?? null;
+    }
+
+    selectEntity(entityId: EntityId): void {
+        const selectionService = this.services.get("selection") as SelectionServiceImpl | undefined;
+        selectionService?.selectEntity(entityId);
+    }
+
+    deselectEntity(): void {
+        const selectionService = this.services.get("selection") as SelectionServiceImpl | undefined;
+        selectionService?.deselectEntity();
+    }
+
     // Component registry access
     getComponentRegistry(): IComponentRegistry {
         return this.componentRegistry;
@@ -147,6 +172,7 @@ export class Engine implements IEngine {
         if (this.isRunning) return;
 
         this.isRunning = true;
+        this.isPausedState = false;
         this.lastTime = performance.now();
 
         // Start time service if available
@@ -160,6 +186,7 @@ export class Engine implements IEngine {
 
     stop(): void {
         this.isRunning = false;
+        this.isPausedState = false;
         if (this.animationFrameId !== null) {
             cancelAnimationFrame(this.animationFrameId);
             this.animationFrameId = null;
@@ -173,7 +200,8 @@ export class Engine implements IEngine {
     }
 
     pause(): void {
-        this.isRunning = false;
+        // Don't stop animation loop, just pause updates
+        this.isPausedState = true;
         const timeService = this.getService<TimeService>("time");
         if (timeService) {
             timeService.pause();
@@ -181,34 +209,34 @@ export class Engine implements IEngine {
     }
 
     resume(): void {
-        if (this.isRunning) return;
-
-        this.isRunning = true;
-        this.lastTime = performance.now();
+        // Resume updates
+        this.isPausedState = false;
+        this.lastTime = performance.now(); // Reset time to avoid large delta
 
         const timeService = this.getService<TimeService>("time");
         if (timeService) {
             timeService.play();
         }
-
-        this.animate();
     }
 
     isPaused(): boolean {
-        return !this.isRunning;
+        return this.isPausedState;
     }
 
     private animate = (): void => {
+        // Stop animation loop entirely if not running
         if (!this.isRunning) return;
 
         const currentTime = performance.now();
         const deltaTime = currentTime - this.lastTime;
         this.lastTime = currentTime;
 
-        // Update engine
-        this.update(deltaTime);
+        // Only update engine state if not paused
+        if (!this.isPausedState) {
+            this.update(deltaTime);
+        }
 
-        // Render if rendering service is available
+        // Always render, even when paused (so satellites stay visible)
         const renderingService = this.getService("rendering");
         if (renderingService && "render" in renderingService) {
             (renderingService as any).render();

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import Stats from "stats.js";
 
 // Import Gorb Bro ECS
 import {
@@ -10,6 +11,7 @@ import {
     PropagationSystem,
     TransformSystem,
     RenderSystem,
+    SelectionSystem,
     createSolarSystem,
     ComponentType,
     OrbitalFormat,
@@ -17,9 +19,9 @@ import {
     type EntityId,
 } from "../engine";
 
-// Import celestial update system and SGP4 propagator
+// Import celestial update system and propagators
 import { CelestialUpdateSystem } from "../engine/systems/CelestialUpdateSystem";
-import { SGP4Propagator } from "../engine/propagators/SGP4Propagator";
+import { HybridK2SGP4Propagator } from "../engine/propagators/HybridK2SGP4Propagator";
 import { TLELoader } from "../engine/utils/TLELoader";
 
 // Import TLE file
@@ -31,13 +33,20 @@ function FullExample() {
     const controlsRef = useRef<OrbitControls | null>(null);
     const celestialSystemRef = useRef<CelestialUpdateSystem | null>(null);
     const satelliteEntitiesRef = useRef<EntityId[]>([]);
+    const statsRef = useRef<Stats | null>(null);
 
+    // UI state that triggers re-renders (only when actually changed)
     const [entityCount, setEntityCount] = useState(0);
     const [satelliteCount, setSatelliteCount] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
-    const [simulationTime, setSimulationTime] = useState(Date.now());
     const [isLoading, setIsLoading] = useState(false);
     const [showCelestialInfo, setShowCelestialInfo] = useState(true);
+    const [selectedEntity, setSelectedEntity] = useState<EntityId | null>(null);
+
+    // Display refs that update without re-render (for frequently changing values)
+    const simTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const entityCountDisplayRef = useRef<HTMLSpanElement>(null);
+    const satelliteCountDisplayRef = useRef<HTMLSpanElement>(null);
 
     useEffect(() => {
         if (!canvasRef.current) return;
@@ -77,6 +86,7 @@ function FullExample() {
             engine.addSystem(new PropagationSystem());
             engine.addSystem(new TransformSystem());
             engine.addSystem(new RenderSystem());
+            engine.addSystem(new SelectionSystem());
 
             // ====================================================================
             // Setup Scene
@@ -100,6 +110,18 @@ function FullExample() {
 
             // Add starfield
             addStarfield(scene);
+
+            // ====================================================================
+            // Setup Stats.js
+            // ====================================================================
+
+            const stats = new Stats();
+            stats.showPanel(0); // 0: fps, 1: ms, 2: mb
+            stats.dom.style.position = "absolute";
+            stats.dom.style.top = "0";
+            stats.dom.style.left = "0";
+            document.body.appendChild(stats.dom);
+            statsRef.current = stats;
 
             // ====================================================================
             // Create Solar System (Earth, Sun, Moon)
@@ -129,27 +151,54 @@ function FullExample() {
                 moon: moon.object,
             });
 
+            // Initial counts
             setEntityCount(engine.getEntityCount());
+            setSatelliteCount(satelliteEntitiesRef.current.length);
 
             // ====================================================================
-            // Update UI periodically
+            // Setup Selection Listener
             // ====================================================================
 
-            const uiUpdateInterval = setInterval(() => {
-                setEntityCount(engine.getEntityCount());
-                setSatelliteCount(satelliteEntitiesRef.current.length);
-                setSimulationTime(timeService.getCurrentTime());
-                setIsPaused(engine.isPaused());
-            }, 100);
+            const selectionService = engine.getService("selection");
+            if (selectionService && "onSelectionChange" in selectionService) {
+                (selectionService as any).onSelectionChange((entityId: EntityId | null) => {
+                    setSelectedEntity(entityId);
+                });
+            }
 
             // ====================================================================
-            // Animation loop with OrbitControls
+            // Animation loop with OrbitControls and Stats
             // ====================================================================
 
             const animate = () => {
                 requestAnimationFrame(animate);
+
+                // Update stats
+                if (statsRef.current) {
+                    statsRef.current.begin();
+                }
+
+                // Update controls
                 if (controlsRef.current) {
                     controlsRef.current.update();
+                }
+
+                // Update display values directly (no re-render)
+                if (simTimeDisplayRef.current) {
+                    simTimeDisplayRef.current.textContent = formatTime(timeService.getCurrentTime());
+                }
+                if (entityCountDisplayRef.current) {
+                    const count = engine.getEntityCount();
+                    entityCountDisplayRef.current.textContent = count.toString();
+                }
+                if (satelliteCountDisplayRef.current) {
+                    satelliteCountDisplayRef.current.textContent = satelliteEntitiesRef.current.length.toString();
+                }
+
+                // Note: isPaused state is now managed by togglePause button directly
+
+                if (statsRef.current) {
+                    statsRef.current.end();
                 }
             };
             animate();
@@ -162,7 +211,10 @@ function FullExample() {
             // ====================================================================
 
             return () => {
-                clearInterval(uiUpdateInterval);
+                // Cleanup
+                if (statsRef.current) {
+                    document.body.removeChild(statsRef.current.dom);
+                }
                 earth.object.destroy();
                 sun.object.destroy();
                 moon.object.destroy();
@@ -185,8 +237,10 @@ function FullExample() {
 
         if (engine.isPaused()) {
             engine.resume();
+            setIsPaused(false);
         } else {
             engine.pause();
+            setIsPaused(true);
         }
     };
 
@@ -211,11 +265,16 @@ function FullExample() {
             const tles = TLELoader.parseTLEText(gpText);
             console.log(`Loaded ${tles.length} TLEs from gp.txt`);
 
-            // Limit to requested count or first 1000
-            const tlesToLoad = count ? tles.slice(0, count) : tles.slice(0, 1000);
+            // Limit to requested count or all
+            const tlesToLoad = count ? tles.slice(0, count) : tles;
 
-            // Create satellites
-            for (const tle of tlesToLoad) {
+            // Calculate stagger offset per satellite
+            const baseStaggerInterval = 1000; // Base 1 second stagger
+            const staggerPerSat = baseStaggerInterval / Math.max(tlesToLoad.length / 100, 1);
+
+            // Create satellites with staggered propagators
+            for (let i = 0; i < tlesToLoad.length; i++) {
+                const tle = tlesToLoad[i];
                 const entity = engine.createEntity();
 
                 // Add orbital elements
@@ -226,11 +285,17 @@ function FullExample() {
                     epoch: Date.now(),
                 });
 
-                // Add SGP4 propagator
+                // Add Hybrid K2/SGP4 propagator with staggered updates
+                const staggerOffset = (i * staggerPerSat) % baseStaggerInterval;
                 engine.addComponent(entity, {
                     type: ComponentType.PROPAGATOR,
                     algorithm: PropagatorAlgorithm.SGP4,
-                    propagator: new SGP4Propagator(TLELoader.toTLE(tle)),
+                    propagator: new HybridK2SGP4Propagator(TLELoader.toTLE(tle), {
+                        sgp4UpdateInterval: 60000, // SGP4 update every 60 seconds
+                        staggerOffset: staggerOffset,
+                        timeJumpThreshold: 1000, // Force SGP4 for jumps >1000 seconds
+                        useK2: true, // Enable K2 for intermediate steps
+                    }),
                 });
 
                 // Add billboard for rendering
@@ -244,7 +309,9 @@ function FullExample() {
                 satelliteEntitiesRef.current.push(entity);
             }
 
-            console.log(`Created ${tlesToLoad.length} satellite entities`);
+            console.log(`Created ${tlesToLoad.length} satellite entities with hybrid K2/SGP4 propagation`);
+            console.log(`Stagger range: 0-${baseStaggerInterval}ms, per satellite: ${staggerPerSat.toFixed(2)}ms`);
+            setSatelliteCount(satelliteEntitiesRef.current.length);
         } catch (error) {
             console.error("Failed to load satellites:", error);
         } finally {
@@ -270,7 +337,13 @@ function FullExample() {
     };
 
     const getCelestialInfo = () => {
-        const date = new Date(simulationTime);
+        const engine = engineRef.current;
+        if (!engine) return { date: "", time: "" };
+
+        const timeService = engine.getService("time") as TimeService;
+        const timestamp = timeService ? timeService.getCurrentTime() : Date.now();
+        const date = new Date(timestamp);
+
         return {
             date: date.toLocaleDateString(),
             time: date.toLocaleTimeString(),
@@ -306,13 +379,16 @@ function FullExample() {
 
                 <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #333" }}>
                     <div style={{ marginBottom: "8px" }}>
-                        <strong>Total Entities:</strong> {entityCount}
+                        <strong>Total Entities:</strong> <span ref={entityCountDisplayRef}>{entityCount}</span>
                     </div>
                     <div style={{ marginBottom: "8px", color: "#00ff00" }}>
-                        <strong>Satellites:</strong> {satelliteCount}
+                        <strong>Satellites:</strong> <span ref={satelliteCountDisplayRef}>{satelliteCount}</span>
                     </div>
                     <div style={{ marginBottom: "8px" }}>
-                        <strong>Sim Time:</strong> {formatTime(simulationTime)}
+                        <strong>Sim Time:</strong> <span ref={simTimeDisplayRef}>{formatTime(Date.now())}</span>
+                    </div>
+                    <div style={{ marginBottom: "8px", color: selectedEntity !== null ? "#ffff00" : undefined }}>
+                        <strong>Selected:</strong> {selectedEntity !== null ? `Entity ${selectedEntity}` : "None"}
                     </div>
                     <div style={{ fontSize: "12px", opacity: 0.7 }}>
                         <strong>Status:</strong> {isPaused ? "⏸ Paused" : "▶ Running"}
@@ -434,6 +510,24 @@ function FullExample() {
                             Clear Satellites
                         </button>
                     </div>
+                </div>
+
+                {/* Propagation Info */}
+                <div
+                    style={{
+                        fontSize: "10px",
+                        opacity: 0.6,
+                        borderTop: "1px solid #333",
+                        paddingTop: "10px",
+                        marginBottom: "10px",
+                    }}
+                >
+                    <div style={{ marginBottom: "5px" }}>
+                        <strong>Propagation:</strong> Hybrid K2/SGP4
+                    </div>
+                    <div>• SGP4: Every 60s (staggered)</div>
+                    <div>• K2: Intermediate frames</div>
+                    <div>• Force SGP4: Time jumps &gt;1000s</div>
                 </div>
 
                 {/* Controls Help */}
