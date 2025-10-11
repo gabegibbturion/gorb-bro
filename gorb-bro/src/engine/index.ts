@@ -21,6 +21,7 @@ export { TransformSystem } from "./systems/TransformSystem";
 export { RenderSystem } from "./systems/RenderSystem";
 export { SelectionSystem } from "./systems/SelectionSystem";
 export { CelestialUpdateSystem } from "./systems/CelestialUpdateSystem";
+export { InstancedSatelliteSystem } from "./systems/InstancedSatelliteSystem";
 
 // Utilities
 export { ComponentPool } from "./utils/ComponentPool";

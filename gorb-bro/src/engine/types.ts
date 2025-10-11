@@ -113,6 +113,10 @@ export interface OrbitalElementsComponent extends BaseComponent {
 }
 
 export interface IPropagator {
+    // ZERO-COPY: Direct array write (optional, for performance)
+    propagateDirect?(elements: OrbitalData, time: number, positionArray: Float32Array, index: number): boolean;
+
+    // Legacy: Returns propagation result
     propagate(elements: OrbitalData, time: number): PropagationResult;
 }
 
@@ -124,8 +128,7 @@ export interface PropagationResult {
 
 export interface PropagatorComponent extends BaseComponent {
     type: ComponentType.PROPAGATOR;
-    algorithm: PropagatorAlgorithm;
-    propagator: IPropagator;
+    propagator: IPropagator; // Propagator knows its own algorithm
 }
 
 export interface BillboardComponent extends BaseComponent {
@@ -323,6 +326,7 @@ export interface IEngine {
     // System management
     addSystem(system: System): void;
     removeSystem(systemName: string): void;
+    getSystem(systemName: string): System | undefined;
 
     // Main update loop
     update(deltaTime: number): void;

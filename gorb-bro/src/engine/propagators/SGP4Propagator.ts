@@ -26,7 +26,46 @@ export class SGP4Propagator implements IPropagator {
     }
 
     /**
-     * Propagate to a specific time
+     * ZERO-COPY: Propagate directly to position array (no return)
+     */
+    propagateDirect(elements: OrbitalData, time: number, positionArray: Float32Array, index: number): boolean {
+        // If elements is TLE, initialize satrec
+        if ("line1" in elements && "line2" in elements) {
+            if (!this.satrec) {
+                this.initializeFromTLE(elements as TLE);
+            }
+        }
+
+        if (!this.satrec) return false;
+
+        const date = new Date(time);
+        const positionAndVelocity = satellite.propagate(this.satrec, date);
+
+        if (!positionAndVelocity || typeof positionAndVelocity === "boolean") {
+            return false;
+        }
+
+        const position = positionAndVelocity.position;
+        if (!position || typeof position === "boolean") {
+            return false;
+        }
+
+        // Check for NaN
+        if (isNaN(position.x) || isNaN(position.y) || isNaN(position.z)) {
+            return false;
+        }
+
+        // Write directly to array at index (in km, no scaling)
+        const i3 = index * 3;
+        positionArray[i3] = position.x;
+        positionArray[i3 + 1] = position.y;
+        positionArray[i3 + 2] = position.z;
+
+        return true;
+    }
+
+    /**
+     * Legacy: Propagate to a specific time (returns values)
      */
     propagate(elements: OrbitalData, time: number): PropagationResult {
         // If elements is TLE, initialize satrec

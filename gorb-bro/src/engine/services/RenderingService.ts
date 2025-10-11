@@ -11,6 +11,7 @@ export class RenderingService implements IRenderingService {
     private materialCache: Map<string, THREE.Material> = new Map();
     private shaderCache: Map<string, THREE.ShaderMaterial> = new Map();
     private resizeHandler: (() => void) | null = null;
+    public lastRenderTime: number = 0; // Exposed for performance tracking
 
     constructor(canvas: HTMLCanvasElement, options?: { antialias?: boolean; autoResize?: boolean }) {
         // Initialize renderer
@@ -106,7 +107,9 @@ export class RenderingService implements IRenderingService {
     }
 
     render(): void {
+        const startTime = performance.now();
         this.renderer.render(this.scene, this.camera);
+        this.lastRenderTime = performance.now() - startTime;
     }
 
     resize(width: number, height: number): void {

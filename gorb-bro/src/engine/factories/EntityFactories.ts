@@ -12,7 +12,7 @@ import type {
     MeshComponent,
     IPropagator,
 } from "../types";
-import { ComponentType, OrbitalFormat, PropagatorAlgorithm, ReferenceFrame } from "../types";
+import { ComponentType, OrbitalFormat, ReferenceFrame } from "../types";
 
 // ============================================================================
 // Simple Mock Propagator for demonstration
@@ -59,10 +59,9 @@ export function createRSO(engine: IEngine, tle: TLE): EntityId {
     };
     engine.addComponent(entity, orbitalElements);
 
-    // Add propagator component
+    // Add propagator component (propagator knows its own algorithm)
     const propagator: PropagatorComponent = {
         type: ComponentType.PROPAGATOR,
-        algorithm: PropagatorAlgorithm.SGP4,
         propagator: new MockSGP4Propagator(),
     };
     engine.addComponent(entity, propagator);

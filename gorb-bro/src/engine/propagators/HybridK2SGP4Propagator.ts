@@ -205,7 +205,59 @@ export class HybridK2SGP4Propagator implements IPropagator {
     }
 
     /**
-     * Propagate to a specific time
+     * ZERO-COPY: Propagate directly to position array (no return)
+     */
+    propagateDirect(elements: OrbitalData, time: number, positionArray: Float32Array, index: number): boolean {
+        // If elements is TLE, initialize satrec
+        if ("line1" in elements && "line2" in elements) {
+            if (!this.satrec) {
+                this.initializeFromTLE(elements as TLE);
+            }
+        }
+
+        if (!this.satrec) return false;
+
+        // Determine if we need SGP4 update
+        const useSGP4 = !this.config.useK2 || this.needsSGP4Update(time);
+
+        let x: number, y: number, z: number;
+
+        if (useSGP4) {
+            // Use SGP4 for high-accuracy update
+            const result = this.propagateSGP4(time);
+            x = result.position.x;
+            y = result.position.y;
+            z = result.position.z;
+        } else {
+            // Use K2 for fast intermediate step
+            const deltaTime = (time - this.lastPropagationTime) / 1000;
+            const result = this.propagateK2(deltaTime);
+            x = result.position.x;
+            y = result.position.y;
+            z = result.position.z;
+        }
+
+        // Write directly to array at index (in km, no scaling)
+        const i3 = index * 3;
+        positionArray[i3] = x;
+        positionArray[i3 + 1] = y;
+        positionArray[i3 + 2] = z;
+
+        // Debug: Log first propagation
+        if (index === 0 && Math.random() < 0.01) {
+            console.log(`[HybridK2SGP4] Propagated to index ${index}:`, {
+                position: `[${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}] km`,
+                usedSGP4: useSGP4,
+                time: new Date(time).toISOString(),
+            });
+        }
+
+        this.lastPropagationTime = time;
+        return true;
+    }
+
+    /**
+     * Legacy: Propagate to a specific time (returns values)
      */
     propagate(elements: OrbitalData, time: number): PropagationResult {
         // If elements is TLE, initialize satrec

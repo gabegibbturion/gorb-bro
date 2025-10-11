@@ -46,6 +46,10 @@ export class RenderSystem implements System {
 
         const startTime = performance.now();
 
+        // Check if InstancedSatelliteSystem is handling billboards
+        const instancedSatelliteSystem = this.engine.getSystem("instancedSatellite");
+        const skipBillboards = instancedSatelliteSystem !== undefined;
+
         for (const entity of entities) {
             const position = this.engine.getComponent<PositionComponent>(entity, ComponentType.POSITION);
 
@@ -58,7 +62,8 @@ export class RenderSystem implements System {
             const mesh = this.engine.getComponent<MeshComponent>(entity, ComponentType.MESH);
 
             // Update or create render object
-            if (billboard && !mesh) {
+            // Skip billboards if InstancedSatelliteSystem is present (it handles them)
+            if (billboard && !mesh && !skipBillboards) {
                 this.updateBillboard(entity, position, billboard);
             } else if (mesh) {
                 this.updateMesh(entity, position, mesh);

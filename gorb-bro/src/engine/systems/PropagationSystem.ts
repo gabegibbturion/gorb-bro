@@ -3,7 +3,7 @@
 import type { System, EntityId, IEngine, OrbitalElementsComponent, PropagatorComponent, PositionComponent, VelocityComponent } from "../types";
 import { ComponentType } from "../types";
 import { TimeService } from "../services/TimeService";
-import type { PositionBufferService } from "../services/PositionBufferService";
+import type { InstancedSatelliteSystem } from "./InstancedSatelliteSystem";
 
 export class PropagationSystem implements System {
     name = "propagation";
@@ -13,13 +13,22 @@ export class PropagationSystem implements System {
 
     private engine: IEngine | null = null;
     private timeService: TimeService | null = null;
-    private positionBuffer: PositionBufferService | null = null;
+    private instancedSatelliteSystem: InstancedSatelliteSystem | null = null;
     public propagationTime: number = 0; // Exposed for stats
 
     init(engine: IEngine): void {
+        console.log("[PropagationSystem] Initializing...");
         this.engine = engine;
         this.timeService = engine.getService<TimeService>("time") || null;
-        this.positionBuffer = engine.getService<PositionBufferService>("positionBuffer") || null;
+
+        // Get InstancedSatelliteSystem for direct array manipulation
+        this.instancedSatelliteSystem = engine.getSystem("instancedSatellite") as InstancedSatelliteSystem | null;
+
+        if (this.instancedSatelliteSystem) {
+            console.log("[PropagationSystem] ✅ Direct array manipulation enabled");
+        } else {
+            console.warn("[PropagationSystem] ⚠️ InstancedSatelliteSystem not found, using fallback");
+        }
     }
 
     update(_deltaTime: number, entities: EntityId[]): void {
@@ -28,6 +37,11 @@ export class PropagationSystem implements System {
         const startTime = performance.now();
         const currentTime = this.timeService.getCurrentTime();
 
+        // Log first propagation
+        if (entities.length > 0 && this.propagationTime === 0) {
+            console.log("[PropagationSystem] 🚀 Starting propagation for", entities.length, "entities");
+        }
+
         for (const entity of entities) {
             const orbital = this.engine.getComponent<OrbitalElementsComponent>(entity, ComponentType.ORBITAL_ELEMENTS);
             const propagator = this.engine.getComponent<PropagatorComponent>(entity, ComponentType.PROPAGATOR);
@@ -35,61 +49,74 @@ export class PropagationSystem implements System {
             if (!orbital || !propagator) continue;
 
             try {
-                // Propagate to current time
-                const state = propagator.propagator.propagate(orbital.data, currentTime);
+                // ZERO-COPY Fast path: Direct array write if available
+                let propagationSuccess = false;
 
-                // Fast path: Write directly to position buffer if available
-                if (this.positionBuffer) {
-                    let bufferIndex = this.positionBuffer.getIndex(entity);
-                    if (bufferIndex === undefined) {
-                        bufferIndex = this.positionBuffer.registerEntity(entity);
+                if (this.instancedSatelliteSystem && propagator.propagator.propagateDirect) {
+                    // Get array access and write directly
+                    const positionArray = this.instancedSatelliteSystem.getPositionArray();
+                    const index = this.instancedSatelliteSystem.getEntityIndex(entity);
+
+                    if (index !== undefined && index >= 0) {
+                        propagationSuccess = propagator.propagator.propagateDirect(orbital.data, currentTime, positionArray, index);
+                    } else {
+                        // Allocate index for new entity
+                        const newIndex = this.instancedSatelliteSystem.allocateIndex(entity);
+                        if (newIndex >= 0) {
+                            propagationSuccess = propagator.propagator.propagateDirect(orbital.data, currentTime, positionArray, newIndex);
+                        }
                     }
-                    this.positionBuffer.writePosition(bufferIndex, state.position.x, state.position.y, state.position.z);
                 }
 
-                // Also update position component for compatibility
-                const existingPos = this.engine.getComponent<PositionComponent>(entity, ComponentType.POSITION);
+                // Fallback: Use legacy API if direct write not available or failed
+                if (!propagationSuccess) {
+                    const state = propagator.propagator.propagate(orbital.data, currentTime);
 
-                if (existingPos) {
-                    // Update existing (fast)
-                    existingPos.x = state.position.x;
-                    existingPos.y = state.position.y;
-                    existingPos.z = state.position.z;
-                    existingPos.frame = state.frame;
-                } else {
-                    // Add new
-                    this.engine.addComponent(entity, {
-                        type: ComponentType.POSITION,
-                        x: state.position.x,
-                        y: state.position.y,
-                        z: state.position.z,
-                        frame: state.frame,
-                    });
-                }
+                    // Try to write via high-level API
+                    if (this.instancedSatelliteSystem) {
+                        this.instancedSatelliteSystem.writePositionDirect(entity, state.position.x, state.position.y, state.position.z);
+                    }
 
-                // Update velocity (less critical for rendering)
-                const existingVel = this.engine.getComponent<VelocityComponent>(entity, ComponentType.VELOCITY);
+                    // Update position component for compatibility
+                    const existingPos = this.engine.getComponent<PositionComponent>(entity, ComponentType.POSITION);
 
-                if (existingVel) {
-                    existingVel.vx = state.velocity.vx;
-                    existingVel.vy = state.velocity.vy;
-                    existingVel.vz = state.velocity.vz;
-                    existingVel.frame = state.frame;
-                } else {
-                    this.engine.addComponent(entity, {
-                        type: ComponentType.VELOCITY,
-                        vx: state.velocity.vx,
-                        vy: state.velocity.vy,
-                        vz: state.velocity.vz,
-                        frame: state.frame,
-                    });
+                    if (existingPos) {
+                        existingPos.x = state.position.x;
+                        existingPos.y = state.position.y;
+                        existingPos.z = state.position.z;
+                        existingPos.frame = state.frame;
+                    } else {
+                        this.engine.addComponent(entity, {
+                            type: ComponentType.POSITION,
+                            x: state.position.x,
+                            y: state.position.y,
+                            z: state.position.z,
+                            frame: state.frame,
+                        });
+                    }
+
+                    // Update velocity
+                    const existingVel = this.engine.getComponent<VelocityComponent>(entity, ComponentType.VELOCITY);
+
+                    if (existingVel) {
+                        existingVel.vx = state.velocity.vx;
+                        existingVel.vy = state.velocity.vy;
+                        existingVel.vz = state.velocity.vz;
+                        existingVel.frame = state.frame;
+                    } else {
+                        this.engine.addComponent(entity, {
+                            type: ComponentType.VELOCITY,
+                            vx: state.velocity.vx,
+                            vy: state.velocity.vy,
+                            vz: state.velocity.vz,
+                            frame: state.frame,
+                        });
+                    }
                 }
             } catch (error) {
                 // Silently skip entities with propagation errors to avoid console spam
-                // Only log occasionally
                 if (Math.random() < 0.001) {
-                    // 0.1% chance
-                    console.warn(`Propagation error for entity ${entity}:`, error);
+                    console.warn(`[PropagationSystem] Propagation error for entity ${entity}:`, error);
                 }
             }
         }
@@ -100,5 +127,6 @@ export class PropagationSystem implements System {
     cleanup(): void {
         this.engine = null;
         this.timeService = null;
+        this.instancedSatelliteSystem = null;
     }
 }

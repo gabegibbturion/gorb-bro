@@ -19,6 +19,7 @@ export class Engine implements IEngine {
     private isPausedState: boolean = false; // Simulation paused (but still rendering)
     private animationFrameId: number | null = null;
     private lastTime: number = 0;
+    public lastUpdateTime: number = 0; // Exposed for performance tracking
 
     constructor(config: EngineConfig = {}) {
         // Initialize core managers
@@ -124,6 +125,8 @@ export class Engine implements IEngine {
 
     // Main update loop
     update(deltaTime: number): void {
+        const startTime = performance.now();
+
         // Update services that have update methods
         this.services.forEach((service) => {
             if ("update" in service && typeof service.update === "function") {
@@ -136,6 +139,8 @@ export class Engine implements IEngine {
 
         // Clear dirty flags after all systems have run
         this.componentRegistry.clearDirty();
+
+        this.lastUpdateTime = performance.now() - startTime;
     }
 
     // Service access

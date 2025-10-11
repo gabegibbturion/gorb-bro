@@ -9,14 +9,13 @@ import {
     RenderingService,
     TimeService,
     PropagationSystem,
-    TransformSystem,
     RenderSystem,
     SelectionSystem,
     createSolarSystem,
     ComponentType,
     OrbitalFormat,
-    PropagatorAlgorithm,
     type EntityId,
+    InstancedSatelliteSystem,
 } from "../engine";
 
 // Import celestial update system and propagators
@@ -51,7 +50,15 @@ function FullExample() {
     const propagationTimeDisplayRef = useRef<HTMLSpanElement>(null);
     const transformTimeDisplayRef = useRef<HTMLSpanElement>(null);
     const renderTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const instancedSatelliteTimeDisplayRef = useRef<HTMLSpanElement>(null);
     const selectionTimeDisplayRef = useRef<HTMLSpanElement>(null);
+
+    // Frame timing refs
+    const totalFrameTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const totalSystemTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const engineOverheadDisplayRef = useRef<HTMLSpanElement>(null);
+    const threeRenderTimeDisplayRef = useRef<HTMLSpanElement>(null);
+    const unmeasuredTimeDisplayRef = useRef<HTMLSpanElement>(null);
 
     useEffect(() => {
         if (!canvasRef.current) return;
@@ -87,9 +94,15 @@ function FullExample() {
             engine.addSystem(celestialSystem);
             celestialSystemRef.current = celestialSystem;
 
-            // Propagation system (for satellites)
+            // Instanced satellite rendering system (MUST be added BEFORE PropagationSystem!)
+            // PropagationSystem needs to find this during init
+            const instancedSatelliteSystem = new InstancedSatelliteSystem(100000);
+            engine.addSystem(instancedSatelliteSystem);
+
+            // Propagation system (for satellites) - added AFTER InstancedSatelliteSystem
             engine.addSystem(new PropagationSystem());
-            engine.addSystem(new TransformSystem());
+
+            // engine.addSystem(new TransformSystem()); // Disabled - not needed for current setup
             engine.addSystem(new RenderSystem());
             engine.addSystem(new SelectionSystem());
 
@@ -97,7 +110,6 @@ function FullExample() {
             // Setup Scene
             // ====================================================================
 
-            const scene = renderingService.getScene();
             const camera = renderingService.getCamera() as THREE.PerspectiveCamera;
             const renderer = renderingService.getRenderer();
 
@@ -156,6 +168,14 @@ function FullExample() {
                 moon: moon.object,
             });
 
+            // DEBUG: Make Earth transparent to see satellites
+            const earthMesh = earth.object.getMesh();
+            if (earthMesh) {
+                (earthMesh.material as THREE.Material).transparent = true;
+                (earthMesh.material as THREE.Material).opacity = 0.3;
+                console.log("[DEBUG] Made Earth transparent (opacity 0.3)");
+            }
+
             // Initial counts
             setEntityCount(engine.getEntityCount());
             setSatelliteCount(satelliteEntitiesRef.current.length);
@@ -176,6 +196,8 @@ function FullExample() {
             // ====================================================================
 
             const animate = () => {
+                const frameStartTime = performance.now();
+
                 requestAnimationFrame(animate);
 
                 // Update stats
@@ -191,9 +213,19 @@ function FullExample() {
                 // Get system timing data
                 const celestialSystem = engine.getSystem("celestialUpdate") as CelestialUpdateSystem | undefined;
                 const propagationSystem = engine.getSystem("propagation") as PropagationSystem | undefined;
-                const transformSystem = engine.getSystem("transform") as TransformSystem | undefined;
+                // const transformSystem = engine.getSystem("transform") as TransformSystem | undefined; // Disabled
                 const renderSystem = engine.getSystem("render") as RenderSystem | undefined;
+                const instancedSatelliteSystem = engine.getSystem("instancedSatellite") as InstancedSatelliteSystem | undefined;
                 const selectionSystem = engine.getSystem("selection") as SelectionSystem | undefined;
+
+                // Calculate total system time
+                const celestialTime = celestialSystem?.celestialUpdateTime || 0;
+                const propagationTime = propagationSystem?.propagationTime || 0;
+                const transformTime = 0; // Disabled
+                const renderSystemTime = renderSystem?.renderTime || 0;
+                const instancedSatelliteTime = instancedSatelliteSystem?.renderTime || 0;
+                const selectionTime = selectionSystem?.selectionTime || 0;
+                const totalSystemTime = celestialTime + propagationTime + transformTime + renderSystemTime + instancedSatelliteTime + selectionTime;
 
                 // Update display values directly (no re-render)
                 if (simTimeDisplayRef.current) {
@@ -212,14 +244,50 @@ function FullExample() {
                 if (propagationTimeDisplayRef.current && propagationSystem) {
                     propagationTimeDisplayRef.current.textContent = propagationSystem.propagationTime.toFixed(2);
                 }
-                if (transformTimeDisplayRef.current && transformSystem) {
-                    transformTimeDisplayRef.current.textContent = transformSystem.transformTime.toFixed(2);
+                // Transform system disabled
+                if (transformTimeDisplayRef.current) {
+                    transformTimeDisplayRef.current.textContent = "N/A";
                 }
                 if (renderTimeDisplayRef.current && renderSystem) {
                     renderTimeDisplayRef.current.textContent = renderSystem.renderTime.toFixed(2);
                 }
+                if (instancedSatelliteTimeDisplayRef.current && instancedSatelliteSystem) {
+                    instancedSatelliteTimeDisplayRef.current.textContent = instancedSatelliteTime.toFixed(2);
+                }
                 if (selectionTimeDisplayRef.current && selectionSystem) {
                     selectionTimeDisplayRef.current.textContent = selectionSystem.selectionTime.toFixed(2);
+                }
+
+                // Calculate frame timing
+                const frameEndTime = performance.now();
+                const totalFrameTime = frameEndTime - frameStartTime;
+
+                // Get engine overhead (time spent in engine.update but not in systems)
+                const engineUpdateTime = (engine as any).lastUpdateTime || 0;
+                const engineOverhead = Math.max(0, engineUpdateTime - totalSystemTime);
+
+                // Get Three.js render time
+                const threeRenderTime = renderingService.lastRenderTime || 0;
+
+                // Calculate unmeasured time (time not accounted for - likely browser/JS overhead, OrbitControls, etc.)
+                const measuredTime = totalSystemTime + engineOverhead + threeRenderTime;
+                const unmeasuredTime = Math.max(0, totalFrameTime - measuredTime);
+
+                // Update frame timing displays
+                if (totalFrameTimeDisplayRef.current) {
+                    totalFrameTimeDisplayRef.current.textContent = totalFrameTime.toFixed(2);
+                }
+                if (totalSystemTimeDisplayRef.current) {
+                    totalSystemTimeDisplayRef.current.textContent = totalSystemTime.toFixed(2);
+                }
+                if (engineOverheadDisplayRef.current) {
+                    engineOverheadDisplayRef.current.textContent = (engineOverhead - totalSystemTime).toFixed(2);
+                }
+                if (threeRenderTimeDisplayRef.current) {
+                    threeRenderTimeDisplayRef.current.textContent = threeRenderTime.toFixed(2);
+                }
+                if (unmeasuredTimeDisplayRef.current) {
+                    unmeasuredTimeDisplayRef.current.textContent = unmeasuredTime.toFixed(2);
                 }
 
                 // Note: isPaused state is now managed by togglePause button directly
@@ -316,7 +384,6 @@ function FullExample() {
                 const staggerOffset = (i * staggerPerSat) % baseStaggerInterval;
                 engine.addComponent(entity, {
                     type: ComponentType.PROPAGATOR,
-                    algorithm: PropagatorAlgorithm.SGP4,
                     propagator: new HybridK2SGP4Propagator(TLELoader.toTLE(tle), {
                         sgp4UpdateInterval: 60000, // SGP4 update every 60 seconds
                         staggerOffset: staggerOffset,
@@ -422,26 +489,53 @@ function FullExample() {
                     </div>
                 </div>
 
-                {/* Performance Stats - System Timings */}
+                {/* Performance Stats - Frame Timing */}
                 <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #333" }}>
                     <div style={{ marginBottom: "10px", color: "#ffaa00" }}>
-                        <strong>⚡ System Timing (ms/frame)</strong>
+                        <strong>⚡ Frame Timing (ms)</strong>
+                    </div>
+                    <div style={{ fontSize: "11px" }}>
+                        <div style={{ marginBottom: "5px", fontWeight: "bold", color: "#00ffff" }}>
+                            <strong>Total Frame:</strong> <span ref={totalFrameTimeDisplayRef}>0.00</span> ms
+                        </div>
+                        <div style={{ marginBottom: "3px", paddingLeft: "10px", opacity: 0.9 }}>
+                            <strong>Systems Total:</strong> <span ref={totalSystemTimeDisplayRef}>0.00</span> ms
+                        </div>
+                        <div style={{ marginBottom: "3px", paddingLeft: "10px", opacity: 0.9 }}>
+                            <strong>Engine Overhead:</strong> <span ref={engineOverheadDisplayRef}>0.00</span> ms
+                        </div>
+                        <div style={{ marginBottom: "3px", paddingLeft: "10px", opacity: 0.9 }}>
+                            <strong>Three.js Render:</strong> <span ref={threeRenderTimeDisplayRef}>0.00</span> ms
+                        </div>
+                        <div style={{ marginBottom: "3px", paddingLeft: "10px", opacity: 0.7, color: "#ff6666" }}>
+                            <strong>Unmeasured:</strong> <span ref={unmeasuredTimeDisplayRef}>0.00</span> ms
+                        </div>
+                    </div>
+                </div>
+
+                {/* Performance Stats - System Breakdown */}
+                <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #333" }}>
+                    <div style={{ marginBottom: "10px", color: "#ffaa00" }}>
+                        <strong>🔧 System Breakdown (ms)</strong>
                     </div>
                     <div style={{ fontSize: "11px" }}>
                         <div style={{ marginBottom: "3px" }}>
-                            <strong>Celestial:</strong> <span ref={celestialUpdateTimeDisplayRef}>0.00</span> ms
+                            <strong>Celestial:</strong> <span ref={celestialUpdateTimeDisplayRef}>0.00</span>
                         </div>
                         <div style={{ marginBottom: "3px" }}>
-                            <strong>Propagation:</strong> <span ref={propagationTimeDisplayRef}>0.00</span> ms
+                            <strong>Propagation:</strong> <span ref={propagationTimeDisplayRef}>0.00</span>
                         </div>
                         <div style={{ marginBottom: "3px" }}>
-                            <strong>Transform:</strong> <span ref={transformTimeDisplayRef}>0.00</span> ms
+                            <strong>Transform:</strong> <span ref={transformTimeDisplayRef}>N/A</span>
                         </div>
                         <div style={{ marginBottom: "3px" }}>
-                            <strong>Render:</strong> <span ref={renderTimeDisplayRef}>0.00</span> ms
+                            <strong>Render:</strong> <span ref={renderTimeDisplayRef}>0.00</span>
                         </div>
                         <div style={{ marginBottom: "3px" }}>
-                            <strong>Selection:</strong> <span ref={selectionTimeDisplayRef}>0.00</span> ms
+                            <strong>Instanced Sats:</strong> <span ref={instancedSatelliteTimeDisplayRef}>0.00</span>
+                        </div>
+                        <div style={{ marginBottom: "3px" }}>
+                            <strong>Selection:</strong> <span ref={selectionTimeDisplayRef}>0.00</span>
                         </div>
                     </div>
                 </div>
@@ -740,28 +834,6 @@ function FullExample() {
             </div>
         </div>
     );
-}
-
-// Helper function to add starfield
-function addStarfield(scene: THREE.Scene) {
-    const starGeometry = new THREE.BufferGeometry();
-    const starMaterial = new THREE.PointsMaterial({
-        color: 0xffffff,
-        size: 1,
-        sizeAttenuation: false,
-    });
-
-    const starVertices = [];
-    for (let i = 0; i < 10000; i++) {
-        const x = (Math.random() - 0.5) * 2000000;
-        const y = (Math.random() - 0.5) * 2000000;
-        const z = (Math.random() - 0.5) * 2000000;
-        starVertices.push(x, y, z);
-    }
-
-    starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starVertices, 3));
-    const stars = new THREE.Points(starGeometry, starMaterial);
-    scene.add(stars);
 }
 
 export default FullExample;
