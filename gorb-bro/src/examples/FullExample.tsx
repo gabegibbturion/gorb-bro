@@ -1,0 +1,574 @@
+import { useEffect, useRef, useState } from "react";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+
+// Import Gorb Bro ECS
+import {
+    Engine,
+    RenderingService,
+    TimeService,
+    PropagationSystem,
+    TransformSystem,
+    RenderSystem,
+    createSolarSystem,
+    ComponentType,
+    OrbitalFormat,
+    PropagatorAlgorithm,
+    type EntityId,
+} from "../engine";
+
+// Import celestial update system and SGP4 propagator
+import { CelestialUpdateSystem } from "../engine/systems/CelestialUpdateSystem";
+import { SGP4Propagator } from "../engine/propagators/SGP4Propagator";
+import { TLELoader } from "../engine/utils/TLELoader";
+
+// Import TLE file
+import gpText from "../assets/gp.txt?raw";
+
+function FullExample() {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const engineRef = useRef<Engine | null>(null);
+    const controlsRef = useRef<OrbitControls | null>(null);
+    const celestialSystemRef = useRef<CelestialUpdateSystem | null>(null);
+    const satelliteEntitiesRef = useRef<EntityId[]>([]);
+
+    const [entityCount, setEntityCount] = useState(0);
+    const [satelliteCount, setSatelliteCount] = useState(0);
+    const [isPaused, setIsPaused] = useState(false);
+    const [simulationTime, setSimulationTime] = useState(Date.now());
+    const [isLoading, setIsLoading] = useState(false);
+    const [showCelestialInfo, setShowCelestialInfo] = useState(true);
+
+    useEffect(() => {
+        if (!canvasRef.current) return;
+
+        const setupScene = async () => {
+            // ====================================================================
+            // Initialize Gorb Bro ECS Engine
+            // ====================================================================
+
+            const renderingService = new RenderingService(canvasRef.current!, {
+                antialias: true,
+            });
+
+            const timeService = new TimeService(Date.now());
+            timeService.play();
+
+            const engine = new Engine({
+                services: {
+                    rendering: renderingService,
+                    time: timeService,
+                },
+                maxEntities: 100000,
+            });
+
+            engineRef.current = engine;
+
+            // ====================================================================
+            // Add Systems
+            // ====================================================================
+
+            // Celestial update system (updates Earth, Sun, Moon)
+            const celestialSystem = new CelestialUpdateSystem();
+            engine.addSystem(celestialSystem);
+            celestialSystemRef.current = celestialSystem;
+
+            // Propagation system (for satellites)
+            engine.addSystem(new PropagationSystem());
+            engine.addSystem(new TransformSystem());
+            engine.addSystem(new RenderSystem());
+
+            // ====================================================================
+            // Setup Scene
+            // ====================================================================
+
+            const scene = renderingService.getScene();
+            const camera = renderingService.getCamera() as THREE.PerspectiveCamera;
+            const renderer = renderingService.getRenderer();
+
+            // Set camera position
+            camera.position.set(0, 0, 25000);
+            camera.lookAt(0, 0, 0);
+
+            // Add orbit controls
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 6500;
+            controls.maxDistance = 500000;
+            controlsRef.current = controls;
+
+            // Add starfield
+            addStarfield(scene);
+
+            // ====================================================================
+            // Create Solar System (Earth, Sun, Moon)
+            // ====================================================================
+
+            const { earth, sun, moon } = await createSolarSystem(engine, {
+                earth: {
+                    radius: 6371,
+                    segments: 64,
+                },
+                sun: {
+                    visualDistance: 200000,
+                    radius: 10000, // Scaled down for visibility
+                    autoPosition: true,
+                },
+                moon: {
+                    visualDistance: 50000,
+                    radius: 1737,
+                    autoPosition: true,
+                },
+            });
+
+            // Register celestial bodies for automatic updates
+            celestialSystem.registerCelestialBodies({
+                earth: earth.object,
+                sun: sun.object,
+                moon: moon.object,
+            });
+
+            setEntityCount(engine.getEntityCount());
+
+            // ====================================================================
+            // Update UI periodically
+            // ====================================================================
+
+            const uiUpdateInterval = setInterval(() => {
+                setEntityCount(engine.getEntityCount());
+                setSatelliteCount(satelliteEntitiesRef.current.length);
+                setSimulationTime(timeService.getCurrentTime());
+                setIsPaused(engine.isPaused());
+            }, 100);
+
+            // ====================================================================
+            // Animation loop with OrbitControls
+            // ====================================================================
+
+            const animate = () => {
+                requestAnimationFrame(animate);
+                if (controlsRef.current) {
+                    controlsRef.current.update();
+                }
+            };
+            animate();
+
+            // Start the engine
+            engine.start();
+
+            // ====================================================================
+            // Cleanup
+            // ====================================================================
+
+            return () => {
+                clearInterval(uiUpdateInterval);
+                earth.object.destroy();
+                sun.object.destroy();
+                moon.object.destroy();
+                engine.cleanup();
+                controls.dispose();
+                renderer.dispose();
+            };
+        };
+
+        setupScene();
+    }, []);
+
+    // ====================================================================
+    // UI Control Functions
+    // ====================================================================
+
+    const togglePause = () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+
+        if (engine.isPaused()) {
+            engine.resume();
+        } else {
+            engine.pause();
+        }
+    };
+
+    const changeSpeed = (speed: number) => {
+        const engine = engineRef.current;
+        if (!engine) return;
+
+        const timeService = engine.getService("time") as TimeService;
+        if (timeService) {
+            timeService.setRate(speed);
+        }
+    };
+
+    const loadSatellites = async (count?: number) => {
+        const engine = engineRef.current;
+        if (!engine) return;
+
+        setIsLoading(true);
+
+        try {
+            // Parse TLE data
+            const tles = TLELoader.parseTLEText(gpText);
+            console.log(`Loaded ${tles.length} TLEs from gp.txt`);
+
+            // Limit to requested count or first 1000
+            const tlesToLoad = count ? tles.slice(0, count) : tles.slice(0, 1000);
+
+            // Create satellites
+            for (const tle of tlesToLoad) {
+                const entity = engine.createEntity();
+
+                // Add orbital elements
+                engine.addComponent(entity, {
+                    type: ComponentType.ORBITAL_ELEMENTS,
+                    format: OrbitalFormat.TLE,
+                    data: TLELoader.toTLE(tle),
+                    epoch: Date.now(),
+                });
+
+                // Add SGP4 propagator
+                engine.addComponent(entity, {
+                    type: ComponentType.PROPAGATOR,
+                    algorithm: PropagatorAlgorithm.SGP4,
+                    propagator: new SGP4Propagator(TLELoader.toTLE(tle)),
+                });
+
+                // Add billboard for rendering
+                engine.addComponent(entity, {
+                    type: ComponentType.BILLBOARD,
+                    size: 50,
+                    color: 0x00ff00,
+                    sizeAttenuation: true,
+                });
+
+                satelliteEntitiesRef.current.push(entity);
+            }
+
+            console.log(`Created ${tlesToLoad.length} satellite entities`);
+        } catch (error) {
+            console.error("Failed to load satellites:", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const clearSatellites = () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+
+        // Destroy all satellite entities
+        for (const entity of satelliteEntitiesRef.current) {
+            engine.destroyEntity(entity);
+        }
+
+        satelliteEntitiesRef.current = [];
+        setSatelliteCount(0);
+    };
+
+    const formatTime = (timestamp: number) => {
+        return new Date(timestamp).toLocaleTimeString();
+    };
+
+    const getCelestialInfo = () => {
+        const date = new Date(simulationTime);
+        return {
+            date: date.toLocaleDateString(),
+            time: date.toLocaleTimeString(),
+        };
+    };
+
+    // ====================================================================
+    // Render UI
+    // ====================================================================
+
+    return (
+        <div style={{ position: "relative", width: "100vw", height: "100vh", backgroundColor: "#000" }}>
+            <canvas ref={canvasRef} />
+
+            {/* Main Control Panel */}
+            <div
+                style={{
+                    position: "absolute",
+                    top: 20,
+                    left: 20,
+                    background: "rgba(0, 0, 0, 0.85)",
+                    color: "white",
+                    padding: "20px",
+                    borderRadius: "8px",
+                    fontFamily: "monospace",
+                    fontSize: "14px",
+                    minWidth: "300px",
+                    maxWidth: "350px",
+                    border: "1px solid #333",
+                }}
+            >
+                <h2 style={{ margin: "0 0 15px 0", fontSize: "20px", color: "#00ff00" }}>🚀 Gorb Bro Full Demo</h2>
+
+                <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #333" }}>
+                    <div style={{ marginBottom: "8px" }}>
+                        <strong>Total Entities:</strong> {entityCount}
+                    </div>
+                    <div style={{ marginBottom: "8px", color: "#00ff00" }}>
+                        <strong>Satellites:</strong> {satelliteCount}
+                    </div>
+                    <div style={{ marginBottom: "8px" }}>
+                        <strong>Sim Time:</strong> {formatTime(simulationTime)}
+                    </div>
+                    <div style={{ fontSize: "12px", opacity: 0.7 }}>
+                        <strong>Status:</strong> {isPaused ? "⏸ Paused" : "▶ Running"}
+                    </div>
+                </div>
+
+                {/* Playback Controls */}
+                <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #333" }}>
+                    <div style={{ marginBottom: "10px" }}>
+                        <strong>Playback:</strong>
+                    </div>
+                    <button
+                        onClick={togglePause}
+                        style={{
+                            padding: "8px 16px",
+                            marginRight: "8px",
+                            cursor: "pointer",
+                            background: isPaused ? "#4CAF50" : "#f44336",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "4px",
+                            fontSize: "14px",
+                        }}
+                    >
+                        {isPaused ? "▶ Play" : "⏸ Pause"}
+                    </button>
+                </div>
+
+                {/* Time Speed Controls */}
+                <div style={{ marginBottom: "15px", paddingBottom: "15px", borderBottom: "1px solid #333" }}>
+                    <div style={{ marginBottom: "10px" }}>
+                        <strong>Time Speed:</strong>
+                    </div>
+                    <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
+                        {[0.1, 0.5, 1, 2, 5, 10, 50, 100].map((speed) => (
+                            <button
+                                key={speed}
+                                onClick={() => changeSpeed(speed)}
+                                style={{
+                                    padding: "6px 12px",
+                                    cursor: "pointer",
+                                    background: "#555",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    fontSize: "12px",
+                                }}
+                            >
+                                {speed}x
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Satellite Loading */}
+                <div style={{ marginBottom: "15px" }}>
+                    <div style={{ marginBottom: "10px" }}>
+                        <strong>Load Satellites:</strong>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <button
+                            onClick={() => loadSatellites(100)}
+                            disabled={isLoading}
+                            style={{
+                                padding: "8px 16px",
+                                cursor: isLoading ? "not-allowed" : "pointer",
+                                background: isLoading ? "#666" : "#2196F3",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                fontSize: "14px",
+                            }}
+                        >
+                            {isLoading ? "Loading..." : "Load 100 Satellites"}
+                        </button>
+                        <button
+                            onClick={() => loadSatellites(1000)}
+                            disabled={isLoading}
+                            style={{
+                                padding: "8px 16px",
+                                cursor: isLoading ? "not-allowed" : "pointer",
+                                background: isLoading ? "#666" : "#2196F3",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                fontSize: "14px",
+                            }}
+                        >
+                            {isLoading ? "Loading..." : "Load 1000 Satellites"}
+                        </button>
+                        <button
+                            onClick={() => loadSatellites()}
+                            disabled={isLoading}
+                            style={{
+                                padding: "8px 16px",
+                                cursor: isLoading ? "not-allowed" : "pointer",
+                                background: isLoading ? "#666" : "#FF9800",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                fontSize: "14px",
+                            }}
+                        >
+                            {isLoading ? "Loading..." : "Load All (GP.TXT)"}
+                        </button>
+                        <button
+                            onClick={clearSatellites}
+                            disabled={satelliteCount === 0}
+                            style={{
+                                padding: "8px 16px",
+                                cursor: satelliteCount === 0 ? "not-allowed" : "pointer",
+                                background: satelliteCount === 0 ? "#666" : "#f44336",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                fontSize: "14px",
+                            }}
+                        >
+                            Clear Satellites
+                        </button>
+                    </div>
+                </div>
+
+                {/* Controls Help */}
+                <div style={{ fontSize: "11px", opacity: 0.7, borderTop: "1px solid #333", paddingTop: "10px" }}>
+                    <div>🖱️ Left drag: Rotate</div>
+                    <div>🖱️ Right drag: Pan</div>
+                    <div>🖱️ Scroll: Zoom</div>
+                </div>
+            </div>
+
+            {/* Celestial Information Panel */}
+            {showCelestialInfo && (
+                <div
+                    style={{
+                        position: "absolute",
+                        bottom: 20,
+                        right: 20,
+                        background: "rgba(0, 0, 0, 0.85)",
+                        color: "white",
+                        padding: "20px",
+                        borderRadius: "8px",
+                        fontFamily: "monospace",
+                        fontSize: "12px",
+                        maxWidth: "300px",
+                        border: "1px solid #333",
+                    }}
+                >
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+                        <h3 style={{ margin: 0, fontSize: "14px", color: "#00ff00" }}>🌍 Celestial Info</h3>
+                        <button
+                            onClick={() => setShowCelestialInfo(false)}
+                            style={{
+                                background: "none",
+                                border: "none",
+                                color: "#999",
+                                cursor: "pointer",
+                                fontSize: "16px",
+                            }}
+                        >
+                            ×
+                        </button>
+                    </div>
+                    <div style={{ opacity: 0.9, lineHeight: "1.6" }}>
+                        <div>
+                            <strong>Date:</strong> {getCelestialInfo().date}
+                        </div>
+                        <div>
+                            <strong>Time:</strong> {getCelestialInfo().time}
+                        </div>
+                        <div style={{ marginTop: "10px", paddingTop: "10px", borderTop: "1px solid #333" }}>
+                            <div>🌍 Earth: Rotating</div>
+                            <div>☀️ Sun: Auto-positioned</div>
+                            <div>🌙 Moon: Auto-positioned</div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {!showCelestialInfo && (
+                <button
+                    onClick={() => setShowCelestialInfo(true)}
+                    style={{
+                        position: "absolute",
+                        bottom: 20,
+                        right: 20,
+                        padding: "10px 15px",
+                        background: "rgba(0, 0, 0, 0.85)",
+                        color: "white",
+                        border: "1px solid #333",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontFamily: "monospace",
+                    }}
+                >
+                    Show Celestial Info
+                </button>
+            )}
+
+            {/* Legend */}
+            <div
+                style={{
+                    position: "absolute",
+                    top: 20,
+                    right: 20,
+                    background: "rgba(0, 0, 0, 0.85)",
+                    color: "white",
+                    padding: "15px",
+                    borderRadius: "8px",
+                    fontFamily: "monospace",
+                    fontSize: "12px",
+                    border: "1px solid #333",
+                }}
+            >
+                <h3 style={{ margin: "0 0 10px 0", fontSize: "14px" }}>Legend</h3>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: "5px" }}>
+                    <div style={{ width: "15px", height: "15px", background: "#2233ff", marginRight: "8px", borderRadius: "50%" }}></div>
+                    <span>Earth</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: "5px" }}>
+                    <div style={{ width: "15px", height: "15px", background: "#ffff00", marginRight: "8px", borderRadius: "50%" }}></div>
+                    <span>Sun</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: "5px" }}>
+                    <div style={{ width: "15px", height: "15px", background: "#aaaaaa", marginRight: "8px", borderRadius: "50%" }}></div>
+                    <span>Moon</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                    <div style={{ width: "15px", height: "15px", background: "#00ff00", marginRight: "8px", borderRadius: "50%" }}></div>
+                    <span>Satellites</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Helper function to add starfield
+function addStarfield(scene: THREE.Scene) {
+    const starGeometry = new THREE.BufferGeometry();
+    const starMaterial = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 1,
+        sizeAttenuation: false,
+    });
+
+    const starVertices = [];
+    for (let i = 0; i < 10000; i++) {
+        const x = (Math.random() - 0.5) * 2000000;
+        const y = (Math.random() - 0.5) * 2000000;
+        const z = (Math.random() - 0.5) * 2000000;
+        starVertices.push(x, y, z);
+    }
+
+    starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starVertices, 3));
+    const stars = new THREE.Points(starGeometry, starMaterial);
+    scene.add(stars);
+}
+
+export default FullExample;
