@@ -27,3 +27,7 @@ Prob wont get:
 - Is illuminated checks
 - Weather stuff
 - 
+
+https://globe-alpha-seven.vercel.app/
+https://satellitevisualization.pythonanywhere.com/whatsOverHead
+https://jsulpis.github.io/realtime-planet-shader/earth/
